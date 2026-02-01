@@ -120,7 +120,8 @@ A function should do one thing. If you find yourself writing comments like `// S
 ```
 src/services/feature-name/
     types.ts           # Interfaces, type definitions
-    index.ts           # Orchestration, public exports
+    repository.ts      # Drizzle queries, row-to-domain mapping
+    index.ts           # Business logic, Result wrapping, public exports
     helper.ts          # Internal helpers (optional)
 ```
 
@@ -129,8 +130,11 @@ src/services/feature-name/
 | File | Contents |
 |------|----------|
 | `types.ts` | Input/output interfaces, constants |
-| `index.ts` | Main orchestration, re-exports |
+| `repository.ts` | Database queries via Drizzle, row-to-domain type mapping. No Result types, no logging — just data access. |
+| `index.ts` | Business logic, Result wrapping, error handling, logging, re-exports |
 | `helper.ts` | Internal helpers, extracted logic |
+
+Each service owns its own repository — no shared repository files.
 
 ---
 
