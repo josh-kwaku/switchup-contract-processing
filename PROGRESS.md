@@ -5,7 +5,7 @@
 SwitchUp Contract Processing System — portfolio demo for Senior Fullstack Engineer application.
 
 **Timeline**: 6-8 hours using Claude Code
-**Current Phase**: Sprint 3 In Progress (Task 3.1 complete)
+**Current Phase**: Sprint 3 In Progress (Tasks 3.1–3.3 complete)
 
 ---
 
@@ -46,8 +46,8 @@ SwitchUp Contract Processing System — portfolio demo for Senior Fullstack Engi
 
 ### Sprint 3: Core Services — Workflow State Machine, Validation, Contracts
 - [x] Task 3.1: Create PDF storage module
-- [ ] Task 3.2: Create workflow state transition service
-- [ ] Task 3.3: Create contract and review task services
+- [x] Task 3.2: Create workflow state transition service
+- [x] Task 3.3: Create contract and review task services
 - [ ] Task 3.4: Create validation service
 
 ### Sprint 4: Windmill Integration — Flow, Scripts, Webhook
