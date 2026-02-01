@@ -18,7 +18,19 @@
 
 ## Technical Debt
 
-*No tech debt yet — project is in design phase.*
+### [TD-001] Old Windmill scripts in f/ need rework
+- **Priority**: High
+- **Component**: workflows
+- **Description**: `f/process_contract/` contains self-contained Windmill scripts with duplicated service logic (~250 lines in `lib.ts`). These need to be replaced with thin HTTP callers per the new architecture (ADR-002).
+- **Impact**: Blocks Sprint 4 implementation. Old scripts are non-functional under the new design.
+- **Suggested fix**: Delete old scripts, implement new thin HTTP callers in Sprint 4 Task 4.3.
+
+### [TD-002] src/workflows/scripts/ and src/workflows/triggers/ are stale
+- **Priority**: Medium
+- **Component**: workflows
+- **Description**: These were canonical Windmill script designs from the old architecture. Under ADR-002, the service owns all logic and Windmill scripts live only in `f/`. These files should be removed in Sprint 4 Task 4.4.
+- **Impact**: Confusing to have stale code in the repo.
+- **Suggested fix**: Delete in Task 4.4 when deploying the new flow.
 
 <!-- Template:
 ### [TD-001] Brief description

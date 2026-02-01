@@ -1,60 +1,58 @@
 # Current Session
 
 **Date**: 2026-02-01
-**Focus**: Sprint 4 — Windmill Integration (complete)
+**Focus**: Sprint 4 — Task 4.2 committed, API simplification refactor
 
 ---
 
 ## Accomplished
 
-### Task 4.1: Set up Windmill local environment + resources (issue #18)
-- `docker-compose.yml` — Windmill server, workers, native workers, LSP, internal Postgres
-- `docs/guides/WINDMILL_SETUP.md` — Setup guide with CLI, workspace, variable configuration
-- Windmill running at localhost:8000, variables configured under `u/kwakujosh/`
+### Task 4.2: Express HTTP API Layer (Committed)
 
-### Task 4.2: Create Windmill flow scripts (issue #19)
-- `src/workflows/scripts/shared.ts` — Shared helpers: `getDb()`, `handleStepError()`, `parseInput()`
-- `src/workflows/scripts/parse-pdf.ts` — PDF parsing step with state transitions
-- `src/workflows/scripts/extract-data.ts` — LLM extraction via Groq + Langfuse
-- `src/workflows/scripts/validate-data.ts` — Validation + contract creation + review routing
-- `src/workflows/scripts/compare-tariffs.ts` — Mock tariff comparison
-- All scripts: Zod input validation, Result type handling, structured logging
+Built the full HTTP API layer with singleton DI pattern (Relevé-style):
 
-### Task 4.3: Wire Windmill flow + webhook trigger (issue #20)
-- `src/workflows/triggers/process-contract.ts` — Webhook entry point (canonical version)
-- `src/workflows/process-contract.flow/flow.yaml` — OpenFlow definition (canonical version)
-- `f/process_contract/` — Windmill-deployable scripts (self-contained for Bun runtime)
-  - `lib.ts` — shared DB schema, state machine, validation, helpers
-  - `trigger.ts`, `parse_pdf.ts`, `extract_data.ts`, `validate_data.ts`, `compare_tariffs.ts`
-  - `flow.flow/flow.yaml` — deployable flow definition
-- Added `updatePdfStoragePath()` to workflow service
-- `wmill.yaml`, `wmill-lock.yaml` — Windmill CLI config
-- `.vscode/settings.json` — disable Estuary schema on flow YAML files
-- End-to-end flow tested successfully in Windmill:
-  `pending → parsing_pdf → extracting → validating → validated → comparing → completed`
+**Architecture (simplified from previous session):**
+- Infrastructure singletons: `getDb()`, `getLangfuse()`, `getLlm()` — lazy init with env var validation
+- Repositories import `getDb()` directly — no `db` parameter threading
+- Services import singletons directly — no deps/db params
+- Routes import service functions directly — no `Services` interface, no `buildServices()`
+- OpenAPI spec in standalone YAML, Swagger UI at `/docs`
+- Ingest service encapsulates PDF storage + parsing
 
-### Key decisions
-- Windmill codebase bundling is Enterprise-only; used self-contained scripts in `f/` as Windmill-deployable layer
-- `src/` remains canonical service layer; `f/` is the Windmill glue
-- `unpdf` used for PDF parsing in Windmill's Bun runtime (pdfjs-dist incompatible)
-- Variables stored as non-secret in Windmill to avoid encryption issues
+**Key files:**
+- `src/api/app.ts` — Express setup, mounts router (8 lines)
+- `src/api/server.ts` — Entry point, warms Langfuse cache
+- `src/api/routes/workflow.ts` — 6 endpoints, direct service imports
+- `src/api/middleware/error-handler.ts` — AppError → HTTP status + envelope
+- `src/api/middleware/request-logger.ts` — Pino request logging
+- `src/api/openapi/` — Spec + Swagger UI setup
+- `src/services/ingest/` — PDF ingest orchestration
 
-### Previous Sessions (carried forward)
+**Endpoints:** POST /workflows/ingest, POST /workflows/:id/extract, POST /workflows/:id/compare, POST /workflows/:id/review, GET /workflows/:id, GET /reviews/pending, GET /health, GET /docs, GET /openapi.json
+
+**Also fixed:**
+- Added `VERTICAL_NOT_FOUND` error code (was using `PROVIDER_NOT_FOUND` for verticals)
+- Structured logging: `details` field instead of `error` in contract/review services
+- JSDoc `@throws` on all singleton getters
+- Excluded stale workflow scripts from tsconfig/eslint (TD-002)
+
+---
+
+## Previous Sessions (carried forward)
 - Sprint 1 complete (Tasks 1.1–1.6): project scaffolding, domain types, logger, Drizzle schema, DB client, migrations, seed, ESLint, pre-commit, provider registry service
 - Sprint 2 complete (Tasks 2.1–2.7): PDF parser, Langfuse module, Langfuse prompts, Groq LLM provider, extraction service, confidence scoring, end-to-end extraction script
 - Sprint 3 complete (Tasks 3.1–3.4): PDF storage module, workflow state transition service, contract and review task services, validation service
+- Sprint 4 partially complete: Task 4.1 done (Windmill env), Task 4.2 done (committed)
 - Design phase complete: PRD, technical design, schema, state machine, error handling, guidelines, subagent, ADRs
-- Sprint plan finalized (v2): 7 sprints, 30 tasks, Drizzle ORM
-- GitHub repo created with 30 issues and project board
+- Sprint plan finalized (v3): 7 sprints, 31 tasks
+- GitHub repo created with issues and project board
 
 ---
 
 ## Next Steps
 
-- Sprint 5: Human-in-the-Loop Review
-  - Task 5.1: Implement Windmill suspend/resume for review (issue #21)
-  - Task 5.2: Implement review correction flow (issue #22)
-  - Task 5.3: Implement review timeout (issue #23)
+- Task 4.3: Rewrite Windmill scripts as thin HTTP callers
+- Task 4.4: Create 4-step flow YAML + deploy, clean up stale code (TD-001, TD-002)
 
 ---
 
