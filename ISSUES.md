@@ -72,4 +72,5 @@ Update this file when:
 
 ### Resolved Issues
 
-*None yet.*
+### [TD-001] Old Windmill scripts in f/ need rework — **Resolved**
+- Replaced with thin HTTP callers in Task 4.3. Old `lib.ts` and duplicated scripts deleted.

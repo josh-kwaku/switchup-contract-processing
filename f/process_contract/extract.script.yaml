@@ -1,0 +1,21 @@
+summary: "Extract and validate contract data"
+description: "Calls service POST /workflows/:id/extract — LLM extraction, validation, confidence scoring."
+lock: ""
+kind: script
+schema:
+  $schema: "https://json-schema.org/draft/2020-12/schema"
+  type: object
+  properties:
+    workflowId:
+      type: string
+      description: "Workflow ID from ingest step"
+    pdfText:
+      type: string
+      description: "Extracted PDF text from ingest step"
+    verticalSlug:
+      type: string
+      description: "Vertical identifier"
+  required:
+    - workflowId
+    - pdfText
+    - verticalSlug

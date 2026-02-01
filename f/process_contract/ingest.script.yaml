@@ -1,5 +1,5 @@
-summary: "Receive contract and create workflow"
-description: "Validates input, looks up vertical, creates workflow row, stores PDF reference."
+summary: "Ingest contract PDF"
+description: "Calls service POST /workflows/ingest — stores PDF, parses text, creates workflow."
 lock: ""
 kind: script
 schema:

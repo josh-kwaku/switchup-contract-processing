@@ -5,7 +5,7 @@
 SwitchUp Contract Processing System — portfolio demo for Senior Fullstack Engineer application.
 
 **Timeline**: 6-8 hours using Claude Code
-**Current Phase**: Sprint 4 In Progress (Task 4.2 committed, Tasks 4.3–4.4 pending)
+**Current Phase**: Sprint 4 In Progress (Tasks 4.1–4.3 done, Task 4.4 pending)
 
 ---
 
@@ -53,7 +53,7 @@ SwitchUp Contract Processing System — portfolio demo for Senior Fullstack Engi
 ### Sprint 4: HTTP Service + Windmill Orchestration (redesigned per ADR-002)
 - [x] Task 4.1: Set up Windmill local environment + resources
 - [x] Task 4.2: Create Express HTTP API layer (singleton DI, Relevé pattern)
-- [ ] Task 4.3: Create thin Windmill scripts (replace old duplicated scripts)
+- [x] Task 4.3: Create thin Windmill scripts (replace old duplicated scripts)
 - [ ] Task 4.4: Create Windmill flow definition + deploy
 
 ### Sprint 5: Human-in-the-Loop Review

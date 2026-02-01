@@ -1,0 +1,13 @@
+summary: "Compare tariffs"
+description: "Calls service POST /workflows/:id/compare — mock tariff comparison."
+lock: ""
+kind: script
+schema:
+  $schema: "https://json-schema.org/draft/2020-12/schema"
+  type: object
+  properties:
+    workflowId:
+      type: string
+      description: "Workflow ID"
+  required:
+    - workflowId
