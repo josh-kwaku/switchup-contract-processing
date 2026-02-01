@@ -5,3 +5,4 @@ dist/
 storage/
 drizzle/meta/
 *.tsbuildinfo
+docs/decisions/archive/

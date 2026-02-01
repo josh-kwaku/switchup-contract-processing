@@ -41,6 +41,7 @@
 ### Code Standards (Always Apply)
 - `docs/guidelines/CODE_GUIDELINES.md` — Code style, Result types, layer dependencies, lightweight DDD
 - `docs/guidelines/ERROR_HANDLING.md` — Error codes, retry strategy, graceful degradation
+- `docs/guidelines/API_GUIDELINES.md` — Response envelope, OpenAPI docs, HTTP status codes, Zod validation
 
 ### Design Documents (Reference)
 - `docs/PRD_Contract_Processing_System.md` — Product requirements

@@ -72,6 +72,23 @@ export async function updateWorkflowState(
   return toWorkflow(rows[0]);
 }
 
+export async function updatePdfStoragePath(
+  db: Database,
+  id: string,
+  pdfStoragePath: string,
+): Promise<Workflow> {
+  const rows = await db
+    .update(workflows)
+    .set({
+      pdfStoragePath,
+      updatedAt: new Date(),
+    })
+    .where(eq(workflows.id, id))
+    .returning();
+
+  return toWorkflow(rows[0]);
+}
+
 export async function incrementRetryCount(
   db: Database,
   id: string,

@@ -1,6 +1,6 @@
 # Sprint Plan: SwitchUp Contract Processing System
 
-**Version:** 2.0
+**Version:** 3.0
 **Date:** February 1, 2026
 **Author:** Joshua Boateng
 **Status:** Ready for implementation
@@ -9,9 +9,18 @@
 
 ## Overview
 
-7 sprints, 30 tasks. Each sprint produces demoable software. Every task is atomic and committable.
+7 sprints, 31 tasks. Each sprint produces demoable software. Every task is atomic and committable.
 
 **ORM:** Drizzle ORM throughout — TypeScript-first schema definitions, type-safe query builder, NeonDB-native adapter. No raw SQL in application code.
+
+**Key changes from v2 (ADR-002):**
+- `src/` deployed as Express HTTP service — service owns all domain logic
+- Windmill is pure orchestrator — thin HTTP callers only, no business logic in `f/`
+- Flow consolidated from 5 steps to 4: ingest, extract (+ validate), compare, approval
+- Sprint 4 rewritten: HTTP API layer (Task 4.2) + thin Windmill scripts (Task 4.3) + flow (Task 4.4)
+- Sprints 5-6 updated: review and retry logic communicated via HTTP
+- Sprint 7: demo script works both direct-to-service and via Windmill
+- See `docs/decisions/ADR-002-windmill-deployment-challenges.md` for full rationale
 
 **Key changes from v1:**
 - Drizzle ORM replaces raw SQL (`db/schema.sql` → `src/infrastructure/db/schema.ts`)
@@ -20,7 +29,6 @@
 - Sprint 3 split: services (Sprint 3) + Windmill (Sprint 4)
 - Langfuse cache built in Task 2.2 (no duplicate task)
 - Windmill resources/variables setup in Task 4.1
-- REST endpoints → Windmill webhooks
 - Git init in Task 1.1
 - NeonDB + Groq account setup in Task 1.1
 - Demo video is a manual task, not in sprint plan
@@ -366,75 +374,102 @@ Schema validation of extracted data against merged config.
 
 ---
 
-## Sprint 4: Windmill Integration — Flow, Scripts, Webhook
+## Sprint 4: HTTP Service + Windmill Orchestration
 
-**Goal:** The full workflow running as a Windmill Flow. State transitions persisted in NeonDB via Drizzle. Triggered via Windmill webhook. Happy path works end-to-end.
+**Goal:** `src/` deployed as an Express HTTP service. Windmill scripts are thin HTTP callers orchestrating the 4-step flow. Happy path works end-to-end. No business logic in Windmill.
 
-**Demo:** Trigger via webhook with high-confidence PDF → progress through states in Windmill UI → verify transitions in `workflow_state_log`.
+**Architecture decision:** ADR-002 — Windmill as pure orchestrator, service owns all domain logic. See `docs/decisions/ADR-002-windmill-deployment-challenges.md`.
 
-### Task 4.1: Set Up Windmill Local Environment + Resources
+**Demo:** `npm run dev` starts service. Trigger Windmill flow → HTTP calls to service → states progress in Windmill UI → verify transitions in `workflow_state_log`.
+
+### Task 4.1: Set Up Windmill Local Environment + Resources ✅ (Complete)
 
 Configure Docker Compose, wmill CLI, and Windmill resources/variables.
 
 **Deliverables:**
 - `docker-compose.yml` — Windmill services (server, workers, database). Port 8000.
 - Install and configure `wmill` CLI. Create workspace. Set up `wmill` sync for local dev.
-- Configure Windmill resources/variables: DATABASE_URL, GROQ_API_KEY, LANGFUSE keys
+- Configure Windmill resources/variables: SERVICE_URL, AUTH_TOKEN
 - Document in `docs/guides/WINDMILL_SETUP.md`
 
 **Validation:** `docker-compose up` → Windmill UI at localhost:8000. `wmill workspace` connected. Resources accessible from test script.
 
 ---
 
-### Task 4.2: Create Windmill Flow Scripts
+### Task 4.2: Create Express HTTP API Layer
 
-Implement scripts for each Flow step. Scripts delegate to services — no business logic.
+Expose the existing service layer as HTTP endpoints. Express app with Zod request validation, response envelope, OpenAPI docs, and request-scoped logging. Must follow `docs/guidelines/API_GUIDELINES.md`.
 
 **Deliverables:**
-- `src/workflows/scripts/parse-pdf.ts` — Receives pdfBase64 + workflowId. Transitions to `parsing_pdf`. Calls pdf-parser. Transitions to `extracting`. Returns extracted text.
-- `src/workflows/scripts/extract-data.ts` — Receives pdfText + workflowId + verticalSlug. Calls extraction service. Returns extraction result.
-- `src/workflows/scripts/validate-data.ts` — Receives extractionResult + workflowId. Calls validation service. Creates contract row. If `needsReview=false`: transitions to `validated`. Returns validation result.
-- `src/workflows/scripts/compare-tariffs.ts` — Transitions to `comparing`. Mock comparison. Transitions to `completed`.
-- `src/workflows/scripts/update-state.ts` — Shared helper wrapping `transitionState`.
+- `src/api/app.ts` — Express app setup: JSON body parser (50MB limit for PDFs), request ID middleware, Swagger UI at `/docs`, OpenAPI spec at `/openapi.json`, error handler
+- `src/api/middleware/error-handler.ts` — Maps `AppError` to HTTP status codes + response envelope (`{ success, data, error }`). Business logic outcomes → 200 with `success: true`. Transient errors → 503 with `retryable: true`. Permanent errors → 400/422.
+- `src/api/middleware/request-logger.ts` — Pino HTTP request logging (method, path, status, duration)
+- `src/api/routes/workflow.ts` — Four processing endpoints + two query endpoints, all with OpenAPI annotations:
+  - `POST /workflows/ingest` — Accepts `{ pdfBase64, verticalSlug, filename? }`. Validates with Zod. Looks up vertical. Stores PDF. Creates workflow. Parses PDF. Returns envelope with `{ workflowId, pdfText, state }`.
+  - `POST /workflows/:id/extract` — Fetches prompt, calls LLM, validates extraction, creates contract. Returns envelope with `{ extractedData, finalConfidence, needsReview, contractId }`.
+  - `POST /workflows/:id/compare` — Runs tariff comparison (mock). Returns envelope with `{ comparison }`.
+  - `POST /workflows/:id/review` — Accepts `{ action, correctedData?, notes? }`. Updates review task and contract. Returns envelope with `{ reviewTask, state }`.
+  - `GET /workflows/:id` — Get workflow status.
+  - `GET /reviews/pending` — List pending review tasks.
+- `src/api/server.ts` — HTTP server entry point. `package.json` scripts: `dev` (ts-node + watch), `start` (compiled)
+- No authentication for this POC (noted as production TODO)
 
-**Validation:** Each script compiles. Service delegation is clean.
+**Validation:**
+- `npm run dev` → server starts on configured port
+- `curl POST /workflows/ingest` with base64 PDF → returns workflowId
+- `curl POST /workflows/:id/extract` → returns extracted data with confidence
+- Error cases return structured JSON with appropriate status codes
 
 ---
 
-### Task 4.3: Wire Windmill Flow + Webhook Trigger
+### Task 4.3: Create Thin Windmill Scripts
 
-Create the Flow definition and webhook entry point. Deploy to local Windmill.
+Rewrite `f/` scripts as thin HTTP callers (~10 lines each). Delete all duplicated service logic.
 
 **Deliverables:**
-- `src/workflows/process-contract.flow.yaml` — Windmill Flow wiring scripts in sequence with branching on `needsReview`
-- `src/workflows/triggers/process-contract.ts` — Webhook:
-  - Accepts `{ pdfBase64, verticalSlug, filename? }`
-  - Validates with Zod
-  - Looks up vertical
-  - Stores PDF via pdf-storage
-  - Creates workflow row via Drizzle
-  - Triggers flow
-  - Returns `{ workflowId, state: 'pending' }`
-- Deploy via `wmill` CLI
+- `f/process_contract/ingest.ts` — Calls `POST /workflows/ingest`, returns response
+- `f/process_contract/extract.ts` — Calls `POST /workflows/:id/extract`, returns response including `needsReview` flag
+- `f/process_contract/compare.ts` — Calls `POST /workflows/:id/compare`, returns response
+- `f/process_contract/handle_review.ts` — Calls `POST /workflows/:id/review` with approval result
+- Delete: `lib.ts`, `trigger.ts`, `parse_pdf.ts`, `extract_data.ts`, `validate_data.ts`, `compare_tariffs.ts` (old duplicated scripts)
+- Windmill variables reduced to: `SERVICE_URL`, `AUTH_TOKEN`
 
-**Validation:** `curl -X POST` to webhook with base64 PDF → returns workflow ID. Flow completes in Windmill UI. `workflow_state_log` shows: pending → parsing_pdf → extracting → validating → validated → comparing → completed.
+**Validation:** Each script is ≤15 lines. No business logic. No direct DB or LLM calls.
+
+---
+
+### Task 4.4: Create Windmill Flow Definition + Deploy
+
+Wire the 4-step flow and deploy to local Windmill.
+
+**Deliverables:**
+- `f/process_contract.flow/flow.yaml` — 4-step flow:
+  1. `ingest` — receive + parse
+  2. `extract` — LLM extraction + validation, branches on `needsReview`
+  3. `compare` — tariff comparison (skipped if `needsReview`)
+  4. Approval step (conditional, only when `needsReview=true`)
+- Deploy scripts and flow via `wmill` CLI
+- Remove `src/workflows/scripts/` and `src/workflows/triggers/` (canonical scripts no longer needed — service owns the logic, Windmill scripts live in `f/`)
+
+**Validation:** Trigger flow with high-confidence PDF → `workflow_state_log` shows: pending → parsing_pdf → extracting → validating → validated → comparing → completed. All state transitions made by the service, not Windmill scripts.
 
 ---
 
 ## Sprint 5: Human-in-the-Loop Review
 
-**Goal:** Low-confidence extractions pause for human review. Approve/reject/correct via Windmill approval UI. 24-hour timeout auto-rejects.
+**Goal:** Low-confidence extractions pause for human review. Approve/reject/correct via Windmill approval UI. 24-hour timeout. Review decisions sent to the service via HTTP.
 
-**Demo:** Low-confidence PDF → pauses → approve in Windmill → completes. Also: review timeout → `timed_out`.
+**Demo:** Low-confidence PDF → flow pauses → approve in Windmill → service records decision → flow resumes → completes. Also: review timeout → `timed_out`.
 
-### Task 5.1: Implement Windmill Suspend/Resume for Review
+### Task 5.1: Implement Review Suspend/Resume
 
-Add the human-in-the-loop branch using Windmill's native suspend/approval.
+Add the human-in-the-loop branch. The extract step returns `needsReview=true`, Windmill suspends, and on resume sends the decision to the service.
 
 **Deliverables:**
-- Update `validate-data.ts` — When `needsReview=true`: transition to `review_required`, create review task, return suspend signal
-- Add approval step to `process-contract.flow.yaml` with Windmill suspend
-- `src/workflows/scripts/handle-review-result.ts` — Receives decision. Updates review task via Drizzle. Approved → `validated`. Rejected → `rejected`.
+- Update extract endpoint — When `needsReview=true`: service transitions to `review_required`, creates review task, response includes `needsReview: true` and `reviewTaskId`
+- Update flow YAML — Branch after extract step: if `needsReview`, go to Windmill approval step; else go to compare
+- Approval step configured with Windmill's native suspend/resume
+- `f/process_contract/handle_review.ts` — On resume, calls `POST /workflows/:id/review` with the reviewer's decision
 
 **Validation:** Trigger with low-confidence PDF:
 - Flow pauses at approval step
@@ -444,20 +479,20 @@ Add the human-in-the-loop branch using Windmill's native suspend/approval.
 
 ---
 
-### Task 5.2: Implement Review Correction Flow
+### Task 5.2: Implement Review Corrections
 
 Handle reviewer corrections to extracted data.
 
 **Deliverables:**
-- Update `handle-review-result.ts` — When corrections provided:
+- Update `POST /workflows/:id/review` endpoint — When action=`correct` with `correctedData`:
   - Store `corrected_data` on review task
-  - Update `contract.extracted_data` via Drizzle
+  - Update `contract.extracted_data`
   - Set `finalConfidence = 100` (human-verified)
   - Transition to `validated`
 
 **Validation:**
-- Low-confidence → review → correct → completes
-- Contract in DB has updated data
+- Low-confidence → review → correct with new data → completes
+- Contract in DB has updated extracted_data
 - Review task: status=`corrected`, corrected_data populated
 
 ---
@@ -467,8 +502,9 @@ Handle reviewer corrections to extracted data.
 24-hour auto-reject for unreviewed tasks (configurable, shortened for testing).
 
 **Deliverables:**
-- Configure approval step timeout (24h production, 30s testing)
-- `src/workflows/scripts/check-timeout.ts` — Timeout handler: transition to `timed_out`, update review task
+- Configure Windmill approval step timeout (24h production, 30s testing)
+- On timeout, Windmill calls `POST /workflows/:id/review` with action=`timeout`
+- Service transitions workflow to `timed_out`, updates review task
 
 **Validation:** Set timeout 30s. Trigger low-confidence → don't approve → after 30s: `timed_out`.
 
@@ -476,56 +512,58 @@ Handle reviewer corrections to extracted data.
 
 ## Sprint 6: Error Handling, Retry Logic, Resilience
 
-**Goal:** Graceful failure handling. Transient errors retry at failed step. Permanent errors fail immediately. Graceful degradation.
+**Goal:** Graceful failure handling. Windmill retries at failed step via HTTP. Service returns structured errors with `retryable` flag. Langfuse cache fallback verified end-to-end.
 
-**Demo:** LLM failure → retry → succeeds. Langfuse down → cached prompt. `workflow_state_log` with retry history.
+**Demo:** LLM failure → Windmill retries extract step → succeeds. Langfuse down → cached prompt. `workflow_state_log` with retry history.
 
-### Task 6.1: Implement Retry Logic in Windmill Flow
+### Task 6.1: Implement Retry Logic
 
-Error handling and retry per step.
+Error handling via HTTP status codes and Windmill retry configuration.
 
 **Deliverables:**
-- Update each script: catch errors → `failWorkflow()` with error code and `failed_at_step`
-- Update flow retry configuration:
-  - `parse-pdf`: no retry (permanent)
-  - `extract-data`: 3 retries, exponential backoff
-  - `validate-data`: 1 retry
-  - `compare-tariffs`: 1 retry
-- retry_count >= 3 → `rejected`
+- Service error responses include `retryable` flag and error code
+- HTTP status mapping: transient errors → 503 (retryable), permanent errors → 400/422 (not retryable)
+- Windmill flow retry configuration per step:
+  - `ingest`: no retry (corrupt PDF is permanent)
+  - `extract`: 3 retries, exponential backoff (LLM failures are transient)
+  - `compare`: 1 retry
+- Service increments `retry_count` on each failed attempt
+- retry_count >= 3 → service transitions to `rejected`
 
 **Validation:**
-- Mock LLM fail once, succeed second → workflow completes
-- Mock LLM fail 3 times → `rejected`
+- Simulate LLM failure (503) → Windmill retries → second call succeeds → workflow completes
+- Simulate 3 consecutive failures → workflow `rejected`
 - `workflow_state_log` shows retry transitions
 
 ---
 
 ### Task 6.2: Verify Langfuse Cache Fallback End-to-End
 
-Ensure cache works within the full Windmill flow (cache built in Task 2.2).
+Ensure cache works within the service (cache built in Task 2.2).
 
 **Deliverables:**
-- Verify cache warms on flow start
+- Verify Langfuse prompt cache warms on service startup
 - Verify stale cache used when Langfuse unavailable (warning log emitted)
-- Verify no cache + Langfuse down → `LANGFUSE_UNAVAILABLE` → `failed`
+- Verify no cache + Langfuse down → `LANGFUSE_UNAVAILABLE` → 503 response
 
-**Validation:** Run flows with Langfuse available and unavailable. Check logs.
+**Validation:** Run flows with Langfuse available and unavailable. Check service logs.
 
 ---
 
 ### Task 6.3: Add Comprehensive Structured Logging
 
-Audit all modules for consistent structured logging.
+Audit all modules for consistent structured logging. Add request-level correlation.
 
 **Deliverables:**
-- Audit all modules: entry/exit logging, error logging with codes, timing for LLM/DB
-- All logs include `workflowId`, `step` context
-- No sensitive data in logs
+- Audit all service modules: entry/exit logging, error logging with codes, timing for LLM/DB
+- All logs include `workflowId`, `step`, `requestId` context
+- HTTP request/response logging with duration
+- No sensitive data in logs (no PDF content, no API keys)
 
-**Validation:** Full workflow → capture logs:
+**Validation:** Full workflow via Windmill → capture service logs:
 - Every state transition: INFO log
 - Every error: ERROR with errorCode, retryable
-- `workflowId` in every line
+- `workflowId` and `requestId` in every line
 - No secrets or PDF content
 
 ---
@@ -551,13 +589,14 @@ Audit all modules for consistent structured logging.
 ### Task 7.2: Create End-to-End Demo Script
 
 **Deliverables:**
-- `scripts/demo.ts` — 3 scenarios:
-  1. **Auto-approve (Energy):** High-confidence Vattenfall → completed
-  2. **Human review (Telco):** Low-confidence Telekom → review required (pauses)
+- `scripts/demo.ts` — Calls the service API directly (no Windmill dependency for basic demo). 3 scenarios:
+  1. **Auto-approve (Energy):** High-confidence Vattenfall → ingest → extract → compare → completed
+  2. **Human review (Telco):** Low-confidence Telekom → ingest → extract → review_required (pauses)
   3. **Unknown provider (Insurance):** Routes to review
-- `package.json` script: `demo`
+- `scripts/demo-windmill.ts` — Triggers via Windmill webhook to show orchestration
+- `package.json` scripts: `demo`, `demo:windmill`
 
-**Validation:** `npm run demo` → scenario 1 completes. Scenarios 2–3 pause for review.
+**Validation:** `npm run demo` → scenario 1 completes end-to-end via HTTP. `npm run demo:windmill` → same flow visible in Windmill UI.
 
 ---
 
@@ -566,10 +605,10 @@ Audit all modules for consistent structured logging.
 **Deliverables:**
 - `README.md`:
   - Project overview and motivation
-  - Architecture diagram (text-based)
-  - Quick start (prerequisites, setup, run)
-  - Demo walkthrough (3 scenarios)
-  - Key design decisions (links to ADRs)
+  - Architecture diagram (service + Windmill orchestrator)
+  - Quick start (prerequisites, setup, run service, run Windmill)
+  - Demo walkthrough (3 scenarios, both direct API and Windmill)
+  - Key design decisions (links to ADRs, especially ADR-002)
   - Provider abstraction (how to add vertical/provider)
   - Tech stack with rationale
   - Project structure
@@ -596,10 +635,10 @@ Audit all modules for consistent structured logging.
 | 1 | Foundation | 6 | 6 |
 | 2 | PDF + LLM Extraction | 7 | 13 |
 | 3 | Core Services | 4 | 17 |
-| 4 | Windmill Integration | 3 | 20 |
-| 5 | Human-in-the-Loop | 3 | 23 |
-| 6 | Error Handling + Resilience | 3 | 26 |
-| 7 | Demo Preparation | 4 | 30 |
+| 4 | HTTP Service + Windmill Orchestration | 4 | 21 |
+| 5 | Human-in-the-Loop | 3 | 24 |
+| 6 | Error Handling + Resilience | 3 | 27 |
+| 7 | Demo Preparation | 4 | 31 |
 
 ---
 
@@ -613,10 +652,13 @@ Addressed within specific tasks, not as separate tasks:
 | Drizzle ORM | Task 1.3 (schema), Task 1.4 (client), all service tasks |
 | Result types | Task 1.2 (type defined), all service tasks |
 | Langfuse cache | Task 2.2 (built with cache + fallback), Task 6.2 (e2e verification) |
-| PDF storage | Task 3.1 (module), Task 4.3 (webhook stores PDF) |
+| PDF storage | Task 3.1 (module), Task 4.2 (ingest endpoint stores PDF) |
 | Windmill resources | Task 4.1 (setup) |
 | wmill CLI sync | Task 4.1 (setup) |
+| Express API | Task 4.2 (app, routes, middleware) |
+| Response envelope | Task 4.2 (API_GUIDELINES.md: `{ success, data, error }`) |
+| OpenAPI docs | Task 4.2 (swagger-jsdoc + Swagger UI at `/docs`) |
+| HTTP error mapping | Task 4.2 (error handler), Task 6.1 (retry status codes) |
 | Git init | Task 1.1 |
 | NeonDB + Groq accounts | Task 1.1 |
-| REST endpoints | Windmill webhooks (Task 4.3) — no Express layer |
 | Demo video | Manual task for author — not in sprint plan |

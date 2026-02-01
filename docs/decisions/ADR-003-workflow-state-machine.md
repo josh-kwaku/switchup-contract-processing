@@ -10,21 +10,21 @@
 
 ### Fine-Grained States (10 total)
 
-Each state maps 1:1 to a Windmill Flow step, making the Flow visualization a live representation of the state machine.
+Each state maps to a logical processing phase. The service owns all state transitions — Windmill orchestrates the step sequence but does not manage state directly.
 
-| State | Type | Windmill Step |
-|-------|------|--------------|
-| `pending` | Initial | Trigger |
-| `parsing_pdf` | Processing | Step 1 |
-| `extracting` | Processing | Step 2 |
-| `validating` | Processing | Step 3 |
-| `review_required` | Suspended | Step 4 (Windmill suspend) |
-| `validated` | Processing | Step 5 (convergence) |
-| `comparing` | Processing | Step 6 (mock tariff) |
-| `completed` | Terminal | End (success) |
-| `rejected` | Terminal | End (rejected) |
-| `timed_out` | Terminal | End (timeout) |
-| `failed` | Transient | Error handler |
+| State | Type | Service Endpoint |
+|-------|------|-----------------|
+| `pending` | Initial | `POST /workflows/ingest` (entry) |
+| `parsing_pdf` | Processing | `POST /workflows/ingest` |
+| `extracting` | Processing | `POST /workflows/:id/extract` |
+| `validating` | Processing | `POST /workflows/:id/extract` |
+| `review_required` | Suspended | `POST /workflows/:id/extract` (triggers Windmill suspend) |
+| `validated` | Processing | `POST /workflows/:id/extract` or `POST /workflows/:id/review` |
+| `comparing` | Processing | `POST /workflows/:id/compare` |
+| `completed` | Terminal | `POST /workflows/:id/compare` |
+| `rejected` | Terminal | `POST /workflows/:id/review` or max retries |
+| `timed_out` | Terminal | `POST /workflows/:id/review` (timeout) |
+| `failed` | Transient | Any endpoint on error |
 
 ### Key Design Choices
 
@@ -35,7 +35,7 @@ Both auto-approve (`validating → validated`) and human-approve (`review_requir
 A workflow in `failed` either gets retried (back to the specific step that failed) or moves to `rejected` (if max retries exceeded).
 
 **3. Smart retry targets the failed step:**
-If the LLM fails at `extracting`, we retry from `extracting` — not from `parsing_pdf`. `workflow_state_log.metadata.failed_at_step` tracks where to resume.
+If the LLM fails at `extracting`, we retry from `extracting` — not from `parsing_pdf`. `workflow_state_log.metadata.failed_at_step` tracks where to resume. Windmill's per-step retry configuration handles this: each step independently retries its HTTP call.
 
 **4. Three distinct terminal states:**
 - `completed` — successfully processed
@@ -45,18 +45,45 @@ If the LLM fails at `extracting`, we retry from `extracting` — not from `parsi
 **5. Validation failures always route to human:**
 Not retry. If the data doesn't match the schema, retrying the same LLM call is unlikely to help. Let a human decide.
 
+**6. Service owns state, Windmill owns sequencing:**
+The service manages all state transitions in the database and logs them to `workflow_state_log`. Windmill decides which endpoint to call next based on the response (e.g., `needsReview: true` → approval step, else → compare). This separation means state logic is testable without Windmill.
+
+---
+
+## State Transitions
+
+| From | To | Trigger | Condition |
+|------|-----|---------|-----------|
+| `pending` | `parsing_pdf` | Ingest endpoint called | — |
+| `parsing_pdf` | `extracting` | PDF text extracted successfully | — |
+| `parsing_pdf` | `failed` | Error | Corrupt PDF, parse error |
+| `extracting` | `validating` | LLM returns parseable JSON | — |
+| `extracting` | `failed` | Error | LLM API error, malformed JSON after 1 retry |
+| `validating` | `validated` | Passes validation | `final_confidence >= 80` AND all required fields valid |
+| `validating` | `review_required` | Needs human | `final_confidence < 80` OR validation failure |
+| `validating` | `failed` | Error | Provider lookup failure, DB error |
+| `review_required` | `validated` | Human approves or corrects | Review task status = approved/corrected |
+| `review_required` | `rejected` | Human rejects | Review task status = rejected |
+| `review_required` | `timed_out` | 24h elapsed | No human action within timeout window |
+| `validated` | `comparing` | Proceed to comparison | — |
+| `comparing` | `completed` | Comparison done | — |
+| `comparing` | `failed` | Error | Unexpected error |
+| `failed` | *(step that failed)* | Retry | `retry_count < 3`, resumes at failed step |
+| `failed` | `rejected` | Max retries exceeded | `retry_count >= 3` |
+
 ---
 
 ## Consequences
 
 ### Positive
-- Windmill Flow DAG directly mirrors the state machine (great for demo)
 - Every processing step has its own state → precise debugging via `workflow_state_log`
 - Smart retry avoids re-parsing PDFs unnecessarily
 - `validated` convergence simplifies downstream logic
+- State logic is fully testable without Windmill
+- Windmill flow visualization reflects step progress
 
 ### Negative
-- 10 states + 16 transitions is more complex than the original 4-state design
+- 10 states + 16 transitions is more complex than a minimal design
 - `failed_at_step` metadata requires careful tracking
 - More state transition validation logic to implement
 
@@ -68,8 +95,8 @@ Not retry. If the data doesn't match the schema, retrying the same LLM call is u
 - States: `pending`, `processing`, `review_required`, `completed`, `rejected`
 - Sub-step tracked in `workflow_state_log.metadata`
 - Pros: Simpler state machine, fewer transitions
-- Cons: Less observable from the workflow table alone, Windmill Flow visualization less meaningful
-- Why rejected: Fine-grained states make a more impressive demo and better debugging experience
+- Cons: Less observable from the workflow table alone
+- Why rejected: Fine-grained states provide better debugging and demo experience
 
 ### Always Retry from Beginning
 - On any failure, restart from `parsing_pdf`

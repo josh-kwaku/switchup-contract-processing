@@ -9,6 +9,7 @@ import {
   insertWorkflow,
   findWorkflowById,
   updateWorkflowState,
+  updatePdfStoragePath as updatePdfStoragePathRepo,
   incrementRetryCount,
   insertStateLog,
 } from './repository.js';
@@ -61,6 +62,24 @@ export async function getWorkflow(
     logger.error({ workflowId, error: message }, 'Failed to fetch workflow');
     return err(
       createAppError('DB_CONNECTION_ERROR', 'Failed to fetch workflow', true, message),
+    );
+  }
+}
+
+export async function updatePdfStoragePath(
+  db: Database,
+  workflowId: string,
+  pdfStoragePath: string,
+): Promise<Result<Workflow, AppError>> {
+  try {
+    const updated = await updatePdfStoragePathRepo(db, workflowId, pdfStoragePath);
+    logger.debug({ workflowId, pdfStoragePath }, 'Updated workflow PDF storage path');
+    return ok(updated);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error({ workflowId, error: message }, 'Failed to update PDF storage path');
+    return err(
+      createAppError('DB_CONNECTION_ERROR', 'Failed to update PDF storage path', true, message),
     );
   }
 }

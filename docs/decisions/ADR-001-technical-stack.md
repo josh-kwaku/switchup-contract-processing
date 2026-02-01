@@ -2,7 +2,7 @@
 
 **Date**: 2026-02-01
 **Status**: Accepted
-**Context**: Choosing LLM provider, PDF parsing, prompt granularity, and confidence scoring approach for the contract processing POC.
+**Context**: Choosing LLM provider, PDF parsing, prompt granularity, confidence scoring, HTTP framework, and orchestration approach for the contract processing system.
 
 ---
 
@@ -53,13 +53,35 @@
 
 ### 5. PDF Input: Base64 in Request Body
 
-**Decision:** Accept PDF as base64-encoded string in the JSON request body. Store as a file reference after saving to disk/Windmill storage.
+**Decision:** Accept PDF as base64-encoded string in the JSON request body. Store as a file reference after saving to disk.
 
 **Rationale:**
 - No file storage infrastructure needed (no S3)
 - Works identically locally and in cloud
 - Easy to test with curl/Postman
 - 33% size overhead acceptable for contract PDFs (typically <1MB)
+
+### 6. HTTP Framework: Express
+
+**Decision:** Use Express as the HTTP framework for the service layer.
+
+**Rationale:**
+- Widely adopted, well-documented, large ecosystem
+- Familiar to most Node.js/TypeScript developers
+- Sufficient for the request volume of a contract processing service
+- Middleware pattern maps cleanly to cross-cutting concerns (error handling, logging, validation)
+
+### 7. Architecture: Service Layer + Windmill as Orchestrator
+
+**Decision:** Deploy the service layer as an independent Express HTTP service. Windmill scripts are thin HTTP callers that handle orchestration only (step sequencing, retries, human-in-the-loop).
+
+**Rationale:**
+- Windmill's Bun runtime cannot import from external project source (Enterprise-only feature)
+- Embedding domain logic in Windmill scripts caused duplication, runtime incompatibilities, and split observability
+- An independent service gives standard observability (structured logging, OpenTelemetry), testability, and portability
+- Windmill stays in its sweet spot: triggering, orchestration, retries, approval UIs
+- If the orchestration layer changes, business logic is untouched
+- See ADR-002 for detailed architectural rationale
 
 ---
 
@@ -70,11 +92,15 @@
 - Model-agnostic architecture demonstrates SwitchUp's provider abstraction challenge
 - Simple, debuggable PDF pipeline
 - Configurable prompt management without prompt explosion
+- Standard observability and testability via independent service
+- Windmill handles orchestration without constraining service design
 
 ### Negative
 - Groq's Llama 3.3 may be less accurate than Claude for German contract extraction
 - Text extraction loses PDF layout information (tables, columns)
 - Base64 input has 33% size overhead and ~10MB practical limit
+- Extra deployment target (service + Windmill)
+- Network hop per orchestration step (~5-20ms, negligible for this pipeline)
 
 ---
 
@@ -94,3 +120,13 @@
 - Pros: Maximum flexibility per provider
 - Cons: 50+ prompts to manage, most would be near-identical within a vertical
 - Why rejected: Provider variation within a vertical is mostly structural, not semantic
+
+### Domain Logic Inside Windmill Scripts
+- Pros: Single deployment target, no HTTP overhead
+- Cons: Import isolation (Enterprise-only bundling), runtime incompatibilities, duplicated code, split observability
+- Why rejected: Fights the platform; see ADR-002 for full analysis
+
+### Fastify / Hono
+- Pros: Better performance benchmarks, lighter weight
+- Cons: Smaller ecosystem, less familiar to most teams
+- Why rejected: Express is sufficient for this workload and more widely understood

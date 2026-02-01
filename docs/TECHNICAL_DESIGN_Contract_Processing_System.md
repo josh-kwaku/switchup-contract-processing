@@ -1,9 +1,9 @@
 # Technical Design Document
 ## Contract Processing Workflow System
 
-**Version:** 1.0  
-**Date:** February 1, 2026  
-**Author:** Joshua Boateng  
+**Version:** 2.0
+**Date:** February 1, 2026
+**Author:** Joshua Boateng
 **Related:** PRD_Contract_Processing_System.md
 
 ---
@@ -27,39 +27,71 @@
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    CLIENT (API Request)                  │
-│              POST /api/contracts/process                 │
-│              { pdf_url, vertical }                       │
+│                    CLIENT (API Request)                   │
+│              POST /workflows/ingest                      │
+│              { pdfBase64, verticalSlug }                  │
 └────────────────────┬────────────────────────────────────┘
                      │
                      ▼
 ┌─────────────────────────────────────────────────────────┐
-│              WINDMILL WORKFLOW ENGINE                    │
+│              WINDMILL (Orchestrator)                      │
 │                                                          │
-│  Extract PDF → Fetch Prompt → LLM Extract →            │
-│  Confidence Check → [Human Review?] → Validate →        │
-│  Store → Complete                                        │
+│  Step 1: Ingest ──→ Step 2: Extract ──→ Step 3: Compare │
+│                         │                                │
+│                    needsReview?                           │
+│                         │                                │
+│                   Step 4: Approval                        │
 │                                                          │
+│  Each step calls the service via HTTP.                   │
+│  No business logic in Windmill scripts.                  │
+└─────┬──────────────────────────────────────────┬────────┘
+      │                                          │
+      │  HTTP calls                              │
+      ▼                                          ▼
+┌─────────────────────────────────────────────────────────┐
+│              EXPRESS SERVICE (Domain Logic)               │
+│                                                          │
+│  /workflows/ingest     → Parse PDF, create workflow      │
+│  /workflows/:id/extract → LLM extraction, validation     │
+│  /workflows/:id/compare → Tariff comparison              │
+│  /workflows/:id/review  → Record review decision         │
+│                                                          │
+│  Owns: state machine, validation, extraction, storage    │
 └─────┬──────────────┬──────────────┬─────────────────────┘
       │              │              │
       ▼              ▼              ▼
 ┌──────────┐   ┌──────────┐   ┌──────────┐
-│ Langfuse │   │  NeonDB  │   │ Anthropic│
-│ Prompts  │   │PostgreSQL│   │  Claude  │
+│ Langfuse │   │  NeonDB  │   │   Groq   │
+│ Prompts  │   │PostgreSQL│   │ Llama 3.3│
 └──────────┘   └──────────┘   └──────────┘
 ```
+
+### Separation of Concerns
+
+| Concern | Owned By | Rationale |
+|---------|----------|-----------|
+| Step sequencing, retries, timeouts | Windmill | Built-in orchestration primitives |
+| Human-in-the-loop approval UI | Windmill | Native suspend/resume |
+| Triggering (webhook) | Windmill | Built-in webhook support |
+| State machine transitions | Service | Testable, single source of truth |
+| PDF parsing, LLM extraction | Service | Standard runtime, no sandbox constraints |
+| Validation, confidence scoring | Service | Pure logic, unit-testable |
+| Database operations | Service | Drizzle ORM, type-safe queries |
+| Observability (logging, tracing) | Service | Standard Pino + OpenTelemetry |
 
 ### Key Architectural Decisions
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| **Workflow Engine** | Windmill (Flow-based, Docker local) | Native suspend/resume for human-in-loop |
+| **Architecture** | Service + Windmill orchestrator | Domain logic in service, Windmill handles orchestration only (ADR-002) |
+| **HTTP Framework** | Express | Widely adopted, familiar, sufficient for workload (ADR-001) |
+| **Workflow Engine** | Windmill (orchestrator only) | Suspend/resume for human-in-loop, visual flow editor |
 | **Database** | NeonDB (Postgres) | Serverless, branching, auto-scales |
 | **Prompt Storage** | Langfuse | Non-technical updates, versioning, tracing |
-| **LLM Provider** | Groq (Llama 3.3 70B), model-agnostic adapter | Free tier, Claude-swappable via config |
+| **LLM Provider** | Groq (Llama 3.3 70B), model-agnostic adapter | Free tier, Claude-swappable via config (ADR-001) |
 | **PDF Parsing** | pdfjs-dist (Mozilla PDF.js) | Actively maintained, reliable extraction |
 | **DDD Approach** | Lightweight | Clear boundaries, skip heavy infrastructure for POC |
-| **State Management** | Database-backed | Survives restarts, enables debugging |
+| **State Management** | Database-backed, service-owned | Survives restarts, testable without Windmill |
 | **Prompt Granularity** | Per-vertical (3 prompts) + provider override | Balance of simplicity and flexibility |
 | **Confidence Scoring** | LLM score + heuristic adjustments | More robust than LLM self-report alone |
 
@@ -118,23 +150,52 @@
 
 ## System Components
 
-### 1. Windmill Workflow Engine
+### 1. Express HTTP Service
 
 **Responsibilities:**
-- Orchestrate multi-step contract processing
-- Manage workflow state transitions
-- Suspend/resume for human approval
-- Retry failed steps
+- Expose domain logic via REST endpoints
+- Zod validation on all request inputs
+- Structured error responses (`{ error: { code, message, retryable } }`)
+- Request-scoped logging with correlation IDs
+- Owns all state transitions, DB operations, and external integrations
 
-**Why Windmill?**
-- Built-in human-in-loop primitives (`suspend()`)
-- TypeScript-native
-- Low-latency execution
-- Local development friendly
+**Endpoints:**
+
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /workflows/ingest` | Receive PDF, parse text, create workflow |
+| `POST /workflows/:id/extract` | LLM extraction + validation |
+| `POST /workflows/:id/compare` | Tariff comparison |
+| `POST /workflows/:id/review` | Record review decision (approve/reject/correct/timeout) |
+| `GET /workflows/:id` | Get workflow status |
+| `GET /reviews/pending` | List pending review tasks |
 
 ---
 
-### 2. Langfuse Prompt Management
+### 2. Windmill Orchestrator
+
+**Responsibilities:**
+- Orchestrate the 4-step flow via HTTP calls to the service
+- Manage retries per step (configurable per step)
+- Suspend/resume for human approval
+- Provide visual flow monitoring
+
+**What Windmill does NOT do:**
+- No business logic
+- No direct database access
+- No LLM calls
+- No state management
+
+**Flow Definition (4 steps):**
+```
+ingest → extract → [needsReview? → approval] → compare → done
+```
+
+Each Windmill script is ~10 lines: parse inputs from previous step, call service endpoint, return response.
+
+---
+
+### 3. Langfuse Prompt Management
 
 **Responsibilities:**
 - Store prompt templates with variables
@@ -146,7 +207,7 @@
 ```typescript
 const prompt = await langfuse.getPrompt("contract-extraction-energy");
 const compiled = prompt.compile({ contract_text: pdfText });
-const response = await claude.call(compiled, prompt.config);
+const response = await llmProvider.extract(compiled, prompt.config);
 ```
 
 **Key Features Used:**
@@ -157,7 +218,7 @@ const response = await claude.call(compiled, prompt.config);
 
 ---
 
-### 3. NeonDB (PostgreSQL)
+### 4. NeonDB (PostgreSQL)
 
 **Responsibilities:**
 - Store workflow state
@@ -178,7 +239,7 @@ DATABASE_URL=postgresql://user:pass@ep-xxx.us-east-2.aws.neon.tech/contracts?ssl
 
 ---
 
-### 4. LLM Provider (Model-Agnostic)
+### 5. LLM Provider (Model-Agnostic)
 
 **Responsibilities:**
 - Extract structured data from unstructured text
@@ -365,7 +426,7 @@ Need to handle Vattenfall (Energy) and Deutsche Telekom (Telco) without duplicat
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│              Workflow (Core Logic)                       │
+│              Workflow (Core Logic)                        │
 │         [Provider-Agnostic Orchestration]                │
 └────────────────────┬────────────────────────────────────┘
                      │
@@ -391,7 +452,7 @@ Need to handle Vattenfall (Energy) and Deutsche Telekom (Telco) without duplicat
 ```sql
 -- Zero code changes needed
 INSERT INTO provider_configs (provider_id, vertical, required_fields, langfuse_prompt_name)
-VALUES ('allianz', 'insurance', 
+VALUES ('allianz', 'insurance',
         ARRAY['provider', 'monthly_premium', 'coverage_type'],
         'contract-extraction-insurance');
 ```
@@ -466,19 +527,19 @@ Then create prompt in Langfuse UI → System automatically handles Insurance con
 
 ### State Definitions
 
-| State | Type | Description | Windmill Flow Step |
-|-------|------|-------------|-------------------|
-| `pending` | Initial | Workflow created, queued for processing | Trigger |
-| `parsing_pdf` | Processing | Extracting text from PDF via pdfjs-dist | Step 1: Parse PDF |
-| `extracting` | Processing | LLM call via Groq (or Claude) for structured extraction | Step 2: LLM Extract |
-| `validating` | Processing | Schema validation, confidence scoring (LLM + heuristic), provider lookup | Step 3: Validate |
-| `review_required` | Suspended | Windmill suspend — waiting for human approve/reject/correct | Step 4: Approval |
-| `validated` | Processing | Data approved (auto or human), convergence point before downstream steps | Step 5: Transition |
-| `comparing` | Processing | Mock tariff comparison step (demonstrates extensibility) | Step 6: Compare |
-| `completed` | Terminal | Successfully processed and stored | End (success) |
-| `rejected` | Terminal | Human rejected OR max retries exceeded | End (rejected) |
-| `timed_out` | Terminal | Review expired after 24h with no human action | End (timed out) |
-| `failed` | Transient | Error occurred at a processing step, may retry | Error handler |
+| State | Type | Description | Service Endpoint |
+|-------|------|-------------|-----------------|
+| `pending` | Initial | Workflow created, queued for processing | `POST /workflows/ingest` |
+| `parsing_pdf` | Processing | Extracting text from PDF via pdfjs-dist | `POST /workflows/ingest` |
+| `extracting` | Processing | LLM call via Groq for structured extraction | `POST /workflows/:id/extract` |
+| `validating` | Processing | Schema validation, confidence scoring, provider lookup | `POST /workflows/:id/extract` |
+| `review_required` | Suspended | Waiting for human approve/reject/correct | `POST /workflows/:id/extract` → Windmill suspends |
+| `validated` | Processing | Data approved (auto or human), convergence point | `POST /workflows/:id/extract` or `/review` |
+| `comparing` | Processing | Mock tariff comparison (demonstrates extensibility) | `POST /workflows/:id/compare` |
+| `completed` | Terminal | Successfully processed and stored | `POST /workflows/:id/compare` |
+| `rejected` | Terminal | Human rejected OR max retries exceeded | `POST /workflows/:id/review` or retry limit |
+| `timed_out` | Terminal | Review expired after 24h with no human action | `POST /workflows/:id/review` (timeout) |
+| `failed` | Transient | Error at a processing step, may retry | Any endpoint on error |
 
 ### State Transitions
 
@@ -504,11 +565,12 @@ Then create prompt in Langfuse UI → System automatically handles Insurance con
 ### Implementation Notes
 
 - **All state transitions logged** in `workflow_state_log` with metadata (error details, trigger info)
-- **Each transition validated** — invalid jumps rejected at the application layer
+- **Each transition validated** — invalid jumps rejected at the service layer
 - **Terminal states:** `completed`, `rejected`, `timed_out`
-- **Retry targets the failed step:** `workflow_state_log.metadata` stores `failed_at_step` so retry logic resumes at the correct point (e.g., `failed` → `extracting`, not back to `parsing_pdf`)
-- **`validated` is a convergence point:** both auto-approve (`validating → validated`) and human-approve (`review_required → validated`) paths merge here, so downstream steps don't need to know whether a human was involved
-- **`failed` is transient, not terminal:** a workflow in `failed` either gets retried or moves to `rejected`
+- **Retry targets the failed step:** `workflow_state_log.metadata` stores `failed_at_step`. Windmill's per-step retry calls the same service endpoint again.
+- **`validated` is a convergence point:** both auto-approve and human-approve paths merge here
+- **`failed` is transient, not terminal:** either retried or moved to `rejected`
+- **Service owns all transitions:** Windmill reads the response to decide the next step but never writes state directly
 
 ---
 
@@ -522,31 +584,49 @@ Then create prompt in Langfuse UI → System automatically handles Insurance con
 2. **Error codes per workflow step** — centralized in `src/domain/errors.ts`
 3. **Retry transient errors only** — permanent errors fail immediately
 4. **Route ambiguous failures to human review** — when in doubt, let a human decide
-5. **No circuit breaker** for POC — each workflow is independent
+5. **HTTP status codes signal retryability** — 503 = retryable, 400/422 = permanent
 
 ### Error → Action Summary
 
 | Step | Transient Errors | Permanent Errors | Validation Errors |
 |------|-----------------|------------------|-------------------|
-| `parsing_pdf` | — | → `rejected` (corrupt PDF) | — |
-| `extracting` | → retry (LLM 5xx, timeout, 429) | → `rejected` (auth error) | Malformed JSON: retry once, then → `review_required` |
-| `validating` | — | — | All validation failures → `review_required` |
-| Any step | DB connection error → retry same step | — | — |
+| `ingest` | — | → `failed` (corrupt PDF) | — |
+| `extract` | → 503 (LLM 5xx, timeout, 429) → Windmill retries | → 400 (auth error) | Malformed JSON: retry once, then → `review_required` |
+| `compare` | → 503 (data source unavailable) | — | — |
+| Any step | DB connection error → 503 | — | — |
+
+### HTTP Error Response Format
+
+All errors use the response envelope (see [API_GUIDELINES.md](docs/guidelines/API_GUIDELINES.md)):
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": {
+    "code": "LLM_API_ERROR",
+    "message": "Groq API returned 503",
+    "retryable": true
+  }
+}
+```
 
 ### Retry Logic
 
-- **Max Attempts:** 3 per workflow
-- **Backoff:** Exponential (1s, 2s, 4s) + jitter
-- **Retry Target:** The specific step that failed (not the entire pipeline)
-- **Tracking:** `workflows.retry_count` + `workflow_state_log.metadata.failed_at_step`
+- **Windmill retry config per step:**
+  - `ingest`: no retry (corrupt PDF is permanent)
+  - `extract`: 3 retries, exponential backoff (LLM failures are transient)
+  - `compare`: 1 retry
+- **Service tracks:** `workflows.retry_count` + `workflow_state_log.metadata.failed_at_step`
+- **Max retries exceeded:** service transitions to `rejected`
 
 ### Graceful Degradation
 
 | Failure | Fallback |
 |---------|----------|
 | Langfuse down | Use cached prompts (5min TTL in memory) |
-| LLM API down (Groq/Claude) | → `failed` state, queue for retry |
-| NeonDB connection lost | Retry connection 3x with backoff, then → `failed` |
+| LLM API down (Groq) | → 503 → Windmill retries |
+| NeonDB connection lost | Retry connection 3x with backoff, then → 503 |
 | Malformed LLM JSON | Retry LLM once inline, then → `review_required` with raw text |
 | Unknown provider extracted | → `review_required` (human decides if provider should be added) |
 
@@ -554,55 +634,193 @@ Then create prompt in Langfuse UI → System automatically handles Insurance con
 
 ## API Design
 
-### Endpoints
+> Full standards in [docs/guidelines/API_GUIDELINES.md](docs/guidelines/API_GUIDELINES.md)
 
-```
-POST   /api/contracts/process      # Initiate workflow
-GET    /api/workflows/:id          # Get workflow status
-GET    /api/reviews/pending        # List pending reviews
-POST   /api/reviews/:id/approve    # Approve review
-POST   /api/reviews/:id/reject     # Reject review
-```
+### Response Envelope
 
-### Example: Initiate Workflow
+All responses use a consistent envelope (adapted from [Relevé API Standards](https://github.com/josh-kwaku/releve)):
 
-**Request:**
-```http
-POST /api/contracts/process
-Content-Type: application/json
-
-{
-  "pdf_url": "s3://contracts/vattenfall-123.pdf",
-  "vertical": "energy"
+```typescript
+interface ApiResponse<T> {
+  success: boolean;
+  data: T | null;
+  error: { code: string; message: string; details?: string; retryable?: boolean } | null;
 }
 ```
 
-**Response (202 Accepted):**
+Business logic outcomes (including `needsReview: true`) return HTTP 200 with `success: true`. Infrastructure errors return HTTP 5xx with `retryable: true` so Windmill retries. See API_GUIDELINES.md for the full status code mapping.
+
+### OpenAPI Documentation
+
+Interactive docs at `/docs` (Swagger UI). Raw spec at `/openapi.json`. Generated via `swagger-jsdoc` annotations on each route.
+
+### Service Endpoints
+
+#### POST /workflows/ingest
+
+Receive a contract PDF, parse it, and create a workflow.
+
+**Request:**
 ```json
 {
-  "workflow_id": "550e8400-e29b-41d4-a716-446655440000",
-  "state": "pending",
-  "created_at": "2026-02-01T10:00:00Z"
+  "pdfBase64": "<base64-encoded-pdf>",
+  "verticalSlug": "energy",
+  "filename": "vattenfall-contract.pdf"
 }
 ```
 
-### Example: Get Status
+**Response (201 Created):**
+```json
+{
+  "success": true,
+  "data": {
+    "workflowId": "550e8400-e29b-41d4-a716-446655440000",
+    "state": "extracting",
+    "pdfText": "Stromvertrag Vattenfall...",
+    "verticalId": "...",
+    "createdAt": "2026-02-01T10:00:00Z"
+  },
+  "error": null
+}
+```
+
+#### POST /workflows/:id/extract
+
+Run LLM extraction and validation on parsed text.
 
 **Request:**
-```http
-GET /api/workflows/550e8400-e29b-41d4-a716-446655440000
+```json
+{
+  "pdfText": "Stromvertrag Vattenfall...",
+  "verticalSlug": "energy"
+}
+```
+
+**Response (200 OK) — auto-approved:**
+```json
+{
+  "success": true,
+  "data": {
+    "workflowId": "550e8400-e29b-41d4-a716-446655440000",
+    "state": "validated",
+    "extractedData": {
+      "provider": "Vattenfall",
+      "monthly_rate": 89.99,
+      "contract_start": "2026-01-01"
+    },
+    "llmConfidence": 92,
+    "finalConfidence": 87,
+    "needsReview": false,
+    "contractId": "..."
+  },
+  "error": null
+}
+```
+
+**Response (200 OK) — needs review:**
+```json
+{
+  "success": true,
+  "data": {
+    "workflowId": "550e8400-e29b-41d4-a716-446655440000",
+    "state": "review_required",
+    "extractedData": { ... },
+    "finalConfidence": 62,
+    "needsReview": true,
+    "contractId": "...",
+    "reviewTaskId": "..."
+  },
+  "error": null
+}
+```
+
+Both are `success: true` — the service processed the request correctly. Windmill reads `data.needsReview` to decide whether to branch to the approval step.
+
+#### POST /workflows/:id/compare
+
+Run tariff comparison (mock for POC).
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "data": {
+    "workflowId": "550e8400-e29b-41d4-a716-446655440000",
+    "state": "completed",
+    "comparison": {
+      "currentTariff": "Vattenfall Basis",
+      "alternatives": []
+    }
+  },
+  "error": null
+}
+```
+
+#### POST /workflows/:id/review
+
+Record a human review decision.
+
+**Request:**
+```json
+{
+  "action": "correct",
+  "correctedData": { "monthly_rate": 79.99 },
+  "notes": "Rate was misread from PDF"
+}
 ```
 
 **Response (200 OK):**
 ```json
 {
-  "id": "550e8400-e29b-41d4-a716-446655440000",
-  "state": "review_required",
-  "vertical": "energy",
-  "contract": {
-    "provider": "Vattenfall",
-    "monthly_rate": 89.99,
-    "confidence": 75
+  "success": true,
+  "data": {
+    "workflowId": "550e8400-e29b-41d4-a716-446655440000",
+    "state": "validated",
+    "reviewTask": {
+      "id": "...",
+      "status": "corrected"
+    }
+  },
+  "error": null
+}
+```
+
+#### GET /workflows/:id
+
+Get workflow status.
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "state": "review_required",
+    "vertical": "energy",
+    "contract": {
+      "provider": "Vattenfall",
+      "monthly_rate": 89.99,
+      "confidence": 75
+    }
+  },
+  "error": null
+}
+```
+
+#### GET /reviews/pending
+
+List pending review tasks.
+
+#### Error Response Example (503 — retryable)
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": {
+    "code": "LLM_API_ERROR",
+    "message": "Groq API returned 503",
+    "retryable": true
   }
 }
 ```
@@ -617,9 +835,9 @@ GET /api/workflows/550e8400-e29b-41d4-a716-446655440000
 |-------|----------------|
 | **Secrets** | Environment variables, never in code |
 | **Input Validation** | Zod schemas on all API inputs |
-| **SQL Injection** | Parameterized queries only |
-| **Rate Limiting** | 100 req/15min per IP |
-| **Authentication** | JWT tokens (future: V2) |
+| **SQL Injection** | Drizzle ORM parameterized queries |
+| **Body Size Limit** | 50MB (Express JSON parser) |
+| **Authentication** | Not implemented for POC (production TODO) |
 
 ### Environment Configuration
 
@@ -632,13 +850,15 @@ LLM_PROVIDER=groq                # groq | anthropic
 LANGFUSE_PUBLIC_KEY=pk-lf-...
 LANGFUSE_SECRET_KEY=sk-lf-...
 LANGFUSE_BASE_URL=https://cloud.langfuse.com
+PORT=3000
 ```
 
 ### Infrastructure
 
+- **Service:** Express (Node.js), deployed locally or on Cloud Run/ECS
 - **Database:** NeonDB (serverless Postgres)
-- **Workflow Engine:** Windmill (Docker locally, cloud for prod)
-- **LLM:** Anthropic Claude API (HTTPS)
+- **Workflow Engine:** Windmill (Docker locally, cloud for prod) — orchestrator only
+- **LLM:** Groq API (HTTPS)
 - **Prompt Management:** Langfuse Cloud (EU region)
 
 ---
@@ -650,66 +870,92 @@ switchup/
 ├── docs/
 │   ├── PRD_Contract_Processing_System.md
 │   ├── TECHNICAL_DESIGN_Contract_Processing_System.md
-│   ├── CONTEXT_FOR_CLAUDE_CODE.md
+│   ├── decisions/                        # ADR-001 through ADR-003
 │   └── guidelines/
-│       ├── CODE_GUIDELINES.md          # Coding standards (adapted from Relevé)
-│       └── ERROR_HANDLING.md           # Error codes, Result types, retry policy
+│       ├── CODE_GUIDELINES.md
+│       └── ERROR_HANDLING.md
 │
 ├── db/
-│   ├── schema.sql                      # Full DDL (all 7 tables + indexes)
-│   └── seed.sql                        # Verticals + sample providers + configs
+│   └── migrations/                       # Drizzle Kit auto-generated
 │
 ├── src/
-│   ├── domain/                         # Domain types & value objects (zero dependencies)
-│   │   ├── types.ts                    # Vertical, Provider, Workflow, Contract, ReviewTask
-│   │   ├── errors.ts                   # ErrorCode enum, AppError interface
-│   │   └── result.ts                   # Result<T, E> utility (ok, err)
+│   ├── domain/                           # Pure types, zero dependencies
+│   │   ├── types.ts                      # Vertical, Provider, Workflow, Contract, ReviewTask
+│   │   ├── errors.ts                     # ErrorCode enum, AppError interface
+│   │   ├── result.ts                     # Result<T, E> utility (ok, err)
+│   │   └── schemas.ts                    # Zod schemas for API inputs
 │   │
-│   ├── services/                       # Domain services (business logic)
+│   ├── services/                         # Business logic
 │   │   ├── extraction/
-│   │   │   ├── types.ts                # ExtractionResult, ConfidenceScore
-│   │   │   ├── llm-provider.ts         # LLMProvider interface + GroqProvider
-│   │   │   ├── confidence.ts           # Heuristic confidence adjustments
-│   │   │   └── index.ts               # ExtractionService orchestration
+│   │   │   ├── types.ts
+│   │   │   ├── confidence.ts             # Heuristic confidence adjustments
+│   │   │   └── index.ts                  # ExtractionService orchestration
 │   │   ├── validation/
 │   │   │   ├── types.ts
-│   │   │   ├── schema-validator.ts     # Validate extracted data vs merged config
+│   │   │   ├── schema-validator.ts
 │   │   │   └── index.ts
 │   │   ├── review/
 │   │   │   ├── types.ts
-│   │   │   └── index.ts               # Create review task, handle approval
+│   │   │   ├── repository.ts
+│   │   │   └── index.ts
+│   │   ├── contract/
+│   │   │   ├── types.ts
+│   │   │   ├── repository.ts
+│   │   │   └── index.ts
+│   │   ├── workflow/
+│   │   │   ├── types.ts
+│   │   │   ├── repository.ts
+│   │   │   └── index.ts
 │   │   └── provider-registry/
 │   │       ├── types.ts
-│   │       └── index.ts               # Config lookup + merge chain
+│   │       ├── repository.ts
+│   │       └── index.ts
 │   │
-│   ├── infrastructure/                 # External integrations (swappable, mockable)
-│   │   ├── database.ts                 # NeonDB connection + query helpers
-│   │   ├── langfuse.ts                 # Langfuse client + prompt cache (5min TTL)
-│   │   ├── groq.ts                     # Groq API client
-│   │   └── pdf-parser.ts              # pdfjs-dist wrapper
+│   ├── infrastructure/                   # External integrations
+│   │   ├── db/
+│   │   │   ├── schema.ts                 # Drizzle table definitions
+│   │   │   └── client.ts                 # NeonDB connection
+│   │   ├── langfuse.ts                   # Langfuse client + prompt cache
+│   │   ├── llm/
+│   │   │   ├── types.ts                  # LLMProvider interface
+│   │   │   ├── groq.ts                   # Groq adapter
+│   │   │   └── index.ts                  # Factory
+│   │   ├── pdf-parser.ts                 # pdfjs-dist wrapper
+│   │   ├── pdf-storage.ts               # Local file storage
+│   │   └── logger.ts                     # Pino structured logger
 │   │
-│   └── workflows/                      # Windmill flow + scripts
-│       ├── process-contract.flow.yaml  # Windmill Flow definition (DAG)
-│       ├── scripts/
-│       │   ├── parse-pdf.ts            # Step 1: PARSING_PDF
-│       │   ├── extract-data.ts         # Step 2: EXTRACTING
-│       │   ├── validate-data.ts        # Step 3: VALIDATING
-│       │   ├── compare-tariffs.ts      # Step 6: COMPARING (mock)
-│       │   └── update-state.ts         # Shared: state transition helper
-│       └── triggers/
-│           └── process-contract.ts     # Webhook trigger entry point
+│   └── api/                              # Express HTTP layer
+│       ├── app.ts                        # Express app setup
+│       ├── server.ts                     # HTTP server entry point
+│       ├── routes/
+│       │   └── workflow.ts               # All workflow endpoints
+│       └── middleware/
+│           ├── error-handler.ts          # AppError → HTTP response
+│           └── request-logger.ts         # Pino HTTP logging
+│
+├── f/                                    # Windmill scripts (thin HTTP callers)
+│   ├── process_contract/
+│   │   ├── ingest.ts                     # ~10 lines: call POST /workflows/ingest
+│   │   ├── extract.ts                    # ~10 lines: call POST /workflows/:id/extract
+│   │   ├── compare.ts                    # ~10 lines: call POST /workflows/:id/compare
+│   │   └── handle_review.ts             # ~10 lines: call POST /workflows/:id/review
+│   └── process_contract.flow/
+│       └── flow.yaml                     # 4-step Windmill flow definition
 │
 ├── test/
-│   ├── fixtures/                       # Synthetic German PDF contracts
-│   │   ├── vattenfall-energy.pdf
-│   │   ├── telekom-telco.pdf
-│   │   └── allianz-insurance.pdf
+│   ├── fixtures/                         # Synthetic German PDF contracts
 │   ├── domain/
 │   ├── services/
-│   └── workflows/
+│   └── api/                              # HTTP endpoint tests
+│
+├── scripts/
+│   ├── migrate.ts
+│   ├── seed.ts
+│   ├── demo.ts                           # Direct API demo
+│   └── demo-windmill.ts                  # Windmill-orchestrated demo
 │
 ├── .env.example
-├── docker-compose.yml                  # Windmill local setup
+├── docker-compose.yml                    # Windmill local setup
 ├── package.json
 ├── tsconfig.json
 └── README.md
@@ -724,7 +970,11 @@ services/        ← Business logic. Depends on domain/ and infrastructure/.
     ↑
 infrastructure/  ← External integrations (DB, Langfuse, Groq, PDF). Depends on domain/.
     ↑
-workflows/       ← Windmill scripts. Orchestrate services. Entry points.
+api/             ← Express HTTP layer. Depends on services/ and domain/.
+                   Thin: validation, routing, error mapping. No business logic.
+
+f/               ← Windmill scripts. HTTP callers only. No imports from src/.
+                   Independent deployment unit.
 ```
 
 > Full coding standards in [docs/guidelines/CODE_GUIDELINES.md](docs/guidelines/CODE_GUIDELINES.md)
@@ -737,7 +987,7 @@ workflows/       ← Windmill scripts. Orchestrate services. Entry points.
 
 ```
      ┌─────────────┐
-     │ Integration │  ← 10 tests (full workflow)
+     │ Integration │  ← 10 tests (full HTTP workflow)
      └─────────────┘
    ┌─────────────────┐
    │  Service Tests  │  ← 30 tests (ExtractionService, etc.)
@@ -751,9 +1001,10 @@ workflows/       ← Windmill scripts. Orchestrate services. Entry points.
 
 1. **High-confidence extraction** → Auto-approve → Complete
 2. **Low-confidence extraction** → Human review → Approve → Complete
-3. **Transient error** → Retry → Success
-4. **Permanent error** → Fail immediately
+3. **Transient error** → 503 response → Windmill retries → Success
+4. **Permanent error** → 400 response → Fail immediately
 5. **Add new provider** → System processes correctly
+6. **Direct API call** → Same behavior without Windmill
 
 ---
 
@@ -764,13 +1015,14 @@ workflows/       ← Windmill scripts. Orchestrate services. Entry points.
 - **Workflow metrics:** Total, completed, failed, avg time
 - **Extraction metrics:** Confidence distribution, review rate
 - **LLM metrics:** Latency, token usage, error rate (via Langfuse)
-- **System metrics:** API latency, DB query time
+- **HTTP metrics:** Request latency, status code distribution, error rate
 
 ### Logging
 
-- Structured JSON logs (pino)
+- Structured JSON logs (Pino)
 - Log levels: ERROR, WARN, INFO, DEBUG
-- Include: workflow_id, vertical, state, timestamp
+- Include: `workflowId`, `requestId`, `step`, `vertical`, `state`
+- HTTP request/response logging with duration
 
 ---
 
@@ -780,30 +1032,9 @@ workflows/       ← Windmill scripts. Orchestrate services. Entry points.
 |----------|----------|-----------|
 | Full DDD vs Lightweight? | **Lightweight** | POC doesn't need heavy infrastructure |
 | Local DB vs Cloud? | **NeonDB (cloud)** | Matches SwitchUp stack, zero ops |
-| Authentication? | **Skip V1, add V2** | Focus on core functionality first |
-| A/B testing prompts? | **V2 feature** | Need traffic first |
-
----
-
-## Next Steps
-
-1. **Setup** (Day 1):
-   - Create NeonDB database
-   - Setup Windmill locally
-   - Create Langfuse account
-   - Initialize project structure
-
-2. **Core Development** (Day 2-3):
-   - Implement extraction service
-   - Build workflow orchestration
-   - Add human review logic
-   - Create provider configs
-
-3. **Polish** (Day 4):
-   - Error handling
-   - Testing
-   - Documentation
-   - Demo preparation
+| Authentication? | **Skip for POC** | Focus on core functionality first |
+| A/B testing prompts? | **Future feature** | Need traffic first |
+| Service deployment? | **Local for POC** | Cloud Run/ECS for production |
 
 ---
 
@@ -813,7 +1044,8 @@ Demo succeeds when:
 1. ✅ Process Energy, Telco, Insurance with same code
 2. ✅ Update prompt in Langfuse → next run uses new version
 3. ✅ Low confidence automatically triggers review
-4. ✅ Failed workflows retry gracefully
+4. ✅ Failed workflows retry gracefully (Windmill retries HTTP calls)
 5. ✅ Code is clean and interview-ready
+6. ✅ Service works both directly (API) and via Windmill orchestration
 
 ---

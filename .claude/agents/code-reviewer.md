@@ -35,9 +35,8 @@ You are a senior code reviewer for the SwitchUp Contract Processing System. Your
 - `domain/` has zero external dependencies — pure types, imported by everything
 - `services/` contains business logic — depends on domain/ and infrastructure/
 - `infrastructure/` wraps external integrations — depends on domain/ only
-- `workflows/scripts/` are entry points — orchestrate services, never contain business logic
-- Windmill scripts are like controllers: receive input, call service, return output
-- No business logic, database queries, or complex transformations in Windmill scripts
+- `api/` is the Express HTTP layer — depends on services/ and domain/. Thin: routing, validation, error mapping. No business logic.
+- `f/` contains Windmill scripts — thin HTTP callers only (~10 lines each). No imports from src/. No business logic, database queries, or LLM calls.
 
 **Module Organization:**
 - Each service uses directory structure: `types.ts`, `index.ts`, optional helpers
@@ -115,7 +114,29 @@ You are a senior code reviewer for the SwitchUp Contract Processing System. Your
 - Adding a provider = INSERT into `providers` + optional `provider_configs` row
 - Core workflow code must not contain vertical-specific or provider-specific logic
 
-### 6. Security
+### 6. API Layer (docs/guidelines/API_GUIDELINES.md)
+
+**Response Envelope:**
+- All responses use `{ success: boolean, data: T | null, error: { code, message, details?, retryable? } | null }`
+- Business logic outcomes (including `needsReview: true`) → HTTP 200 with `success: true`
+- Transient errors (LLM down, DB timeout) → HTTP 503 with `retryable: true`
+- Permanent errors (corrupt PDF, auth error) → HTTP 400 with `retryable: false`
+- Validation errors (bad request body) → HTTP 422
+- Never return bare objects without the envelope
+
+**OpenAPI:**
+- All route handlers must have `@openapi` JSDoc annotations
+- Swagger UI served at `/docs`, spec at `/openapi.json`
+
+**Request Validation:**
+- All request bodies validated with Zod at route handler level
+- Validation errors return 422 with field-level details in `error.details`
+
+**Windmill Integration:**
+- Windmill retries on HTTP 5xx — business logic must never return 5xx for expected outcomes
+- Windmill reads `data.needsReview` (or similar flags) to decide branching — these are always HTTP 200
+
+### 7. Security
 
 - No exposed secrets, API keys, or credentials in code
 - Input validation prevents injection (SQL injection via parameterized queries)
@@ -123,7 +144,7 @@ You are a senior code reviewer for the SwitchUp Contract Processing System. Your
 - PDF content not logged or stored in plain text unnecessarily
 - Zod validation on all external inputs
 
-### 7. Type Safety (TypeScript)
+### 8. Type Safety (TypeScript)
 
 - All function parameters and return types should have type annotations
 - Use `Result<T, AppError>` return types, not `Promise<any>`
@@ -132,7 +153,7 @@ You are a senior code reviewer for the SwitchUp Contract Processing System. Your
 - Check that return types match declared type annotations
 - Zod schemas should align with TypeScript types
 
-### 8. Test Quality
+### 9. Test Quality
 
 **Tests should be:**
 - Useful (test actual behavior, not implementation details)
