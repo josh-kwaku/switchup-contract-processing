@@ -110,3 +110,21 @@ export interface WorkflowStateLog {
   metadata: Record<string, unknown> | null;
   createdAt: Date;
 }
+
+export interface ValidationRule {
+  min?: number;
+  max?: number;
+}
+
+export type ValidationRules = Record<string, ValidationRule>;
+
+export interface ConfidenceAdjustment {
+  reason: string;
+  penalty: number;
+  field?: string;
+}
+
+export interface ConfidenceResult {
+  finalConfidence: number;
+  adjustments: ConfidenceAdjustment[];
+}
