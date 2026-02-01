@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import type { Database } from '../../infrastructure/db/client.js';
+import { getDb } from '../../infrastructure/db/client.js';
 import { contracts } from '../../infrastructure/db/schema.js';
 import type { Contract } from '../../domain/types.js';
 import type { CreateContractInput, UpdateContractDataInput } from './types.js';
@@ -19,10 +19,9 @@ function toContract(row: typeof contracts.$inferSelect): Contract {
 }
 
 export async function insertContract(
-  db: Database,
   input: CreateContractInput,
 ): Promise<Contract> {
-  const rows = await db
+  const rows = await getDb()
     .insert(contracts)
     .values({
       workflowId: input.workflowId,
@@ -38,10 +37,9 @@ export async function insertContract(
 }
 
 export async function findContractById(
-  db: Database,
   id: string,
 ): Promise<Contract | null> {
-  const rows = await db
+  const rows = await getDb()
     .select()
     .from(contracts)
     .where(eq(contracts.id, id));
@@ -50,10 +48,9 @@ export async function findContractById(
 }
 
 export async function findContractByWorkflowId(
-  db: Database,
   workflowId: string,
 ): Promise<Contract | null> {
-  const rows = await db
+  const rows = await getDb()
     .select()
     .from(contracts)
     .where(eq(contracts.workflowId, workflowId));
@@ -62,11 +59,10 @@ export async function findContractByWorkflowId(
 }
 
 export async function updateContractData(
-  db: Database,
   id: string,
   input: UpdateContractDataInput,
 ): Promise<Contract | null> {
-  const rows = await db
+  const rows = await getDb()
     .update(contracts)
     .set({
       extractedData: input.extractedData,

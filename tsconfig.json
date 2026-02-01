@@ -23,5 +23,5 @@
     "baseUrl": "."
   },
   "include": ["src/**/*.ts", "scripts/**/*.ts", "drizzle.config.ts"],
-  "exclude": ["node_modules", "dist", "test"]
+  "exclude": ["node_modules", "dist", "test", "src/workflows/scripts", "src/workflows/triggers"]
 }

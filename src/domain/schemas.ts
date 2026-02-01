@@ -21,5 +21,11 @@ export const reviewActionInput = z.discriminatedUnion('action', [
   }),
 ]);
 
+export const extractRequestInput = z.object({
+  pdfText: z.string().min(1, 'PDF text is required'),
+  verticalSlug: z.string().min(1, 'Vertical slug is required'),
+});
+
 export type ProcessContractInput = z.infer<typeof processContractInput>;
 export type ReviewActionInput = z.infer<typeof reviewActionInput>;
+export type ExtractRequestInput = z.infer<typeof extractRequestInput>;

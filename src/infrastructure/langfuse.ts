@@ -164,6 +164,14 @@ export class LangfuseService {
   }
 }
 
+let instance: LangfuseService | null = null;
+
+/** @throws {Error} If LANGFUSE_PUBLIC_KEY or LANGFUSE_SECRET_KEY are not set */
+export function getLangfuse(): LangfuseService {
+  if (!instance) instance = new LangfuseService(createLangfuseClientFromEnv());
+  return instance;
+}
+
 /** @throws {Error} If LANGFUSE_PUBLIC_KEY or LANGFUSE_SECRET_KEY are not set */
 export function createLangfuseClientFromEnv(): LangfuseClient {
   const publicKey = process.env.LANGFUSE_PUBLIC_KEY;

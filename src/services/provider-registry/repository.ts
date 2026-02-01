@@ -1,5 +1,5 @@
 import { eq, and } from 'drizzle-orm';
-import type { Database } from '../../infrastructure/db/client.js';
+import { getDb } from '../../infrastructure/db/client.js';
 import { verticals, providers, providerConfigs } from '../../infrastructure/db/schema.js';
 import type { Vertical, Provider, ProviderConfig } from '../../domain/types.js';
 
@@ -44,10 +44,9 @@ function toProviderConfig(row: typeof providerConfigs.$inferSelect): ProviderCon
 }
 
 export async function findVerticalBySlug(
-  db: Database,
   slug: string,
 ): Promise<Vertical | null> {
-  const rows = await db
+  const rows = await getDb()
     .select()
     .from(verticals)
     .where(and(eq(verticals.slug, slug), eq(verticals.active, true)));
@@ -56,10 +55,9 @@ export async function findVerticalBySlug(
 }
 
 export async function findVerticalById(
-  db: Database,
   id: string,
 ): Promise<Vertical | null> {
-  const rows = await db
+  const rows = await getDb()
     .select()
     .from(verticals)
     .where(eq(verticals.id, id));
@@ -68,11 +66,10 @@ export async function findVerticalById(
 }
 
 export async function findProviderBySlug(
-  db: Database,
   slug: string,
   verticalId: string,
 ): Promise<Provider | null> {
-  const rows = await db
+  const rows = await getDb()
     .select()
     .from(providers)
     .where(
@@ -87,10 +84,9 @@ export async function findProviderBySlug(
 }
 
 export async function findActiveProviderConfig(
-  db: Database,
   providerId: string,
 ): Promise<ProviderConfig | null> {
-  const rows = await db
+  const rows = await getDb()
     .select()
     .from(providerConfigs)
     .where(

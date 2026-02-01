@@ -1,15 +1,18 @@
 import { ok, err, type Result } from '../../domain/result.js';
 import { createAppError, ErrorCode, type AppError } from '../../domain/errors.js';
 import { logger } from '../../infrastructure/logger.js';
+import { getLangfuse } from '../../infrastructure/langfuse.js';
+import { getLlm } from '../../infrastructure/llm/index.js';
+import type { LLMProvider } from '../../infrastructure/llm/types.js';
 import type { Vertical } from '../../domain/types.js';
-import type { ExtractionDeps, ExtractionResult } from './types.js';
+import type { ExtractionResult } from './types.js';
 
-export type { ExtractionResult, ExtractionDeps } from './types.js';
+export type { ExtractionResult } from './types.js';
 
 const log = logger.child({ module: 'extraction' });
+const PROMPT_LABEL = 'production';
 
 export async function extractContractData(
-  deps: ExtractionDeps,
   pdfText: string,
   vertical: Vertical,
   providerHint?: string,
@@ -19,9 +22,12 @@ export async function extractContractData(
 
   log.info(ctx, 'Starting contract extraction');
 
-  const promptResult = await deps.langfuse.getPrompt(
+  const langfuse = getLangfuse();
+  const llm = getLlm();
+
+  const promptResult = await langfuse.getPrompt(
     vertical.defaultPromptName,
-    deps.promptLabel,
+    PROMPT_LABEL,
     workflowId,
   );
   if (!promptResult.ok) return promptResult;
@@ -30,7 +36,7 @@ export async function extractContractData(
     .replace('{{contract_text}}', pdfText)
     .replace('{{vertical}}', vertical.slug);
 
-  const llmResult = await callLlm(deps, systemPrompt, pdfText, ctx);
+  const llmResult = await callLlm(llm, systemPrompt, pdfText, ctx);
   if (!llmResult.ok) return llmResult;
 
   const { response, parsed } = llmResult.value;
@@ -46,7 +52,7 @@ export async function extractContractData(
     latencyMs: response.latencyMs,
   };
 
-  deps.langfuse.traceGeneration({
+  langfuse.traceGeneration({
     traceId: workflowId ?? crypto.randomUUID(),
     name: `extraction-${vertical.slug}`,
     model: response.model,
@@ -64,12 +70,12 @@ export async function extractContractData(
 }
 
 async function callLlm(
-  deps: ExtractionDeps,
+  llm: LLMProvider,
   systemPrompt: string,
   pdfText: string,
   ctx: Record<string, unknown>,
 ): Promise<Result<{ response: { content: string; model: string; latencyMs: number }; parsed: Record<string, unknown> }, AppError>> {
-  const chatResult = await deps.llm.chat(systemPrompt, pdfText, { responseFormat: 'json' });
+  const chatResult = await llm.chat(systemPrompt, pdfText, { responseFormat: 'json' });
   if (!chatResult.ok) return chatResult;
 
   const parsed = tryParseJson(chatResult.value.content);
@@ -79,7 +85,7 @@ async function callLlm(
 
   log.warn({ ...ctx, errorCode: ErrorCode.LLM_MALFORMED_RESPONSE }, 'LLM returned malformed JSON, retrying once');
 
-  const retryResult = await deps.llm.chat(systemPrompt, pdfText, { responseFormat: 'json' });
+  const retryResult = await llm.chat(systemPrompt, pdfText, { responseFormat: 'json' });
   if (!retryResult.ok) return retryResult;
 
   const retryParsed = tryParseJson(retryResult.value.content);

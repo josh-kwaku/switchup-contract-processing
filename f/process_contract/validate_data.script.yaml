@@ -1,0 +1,27 @@
+summary: "Validate extracted data and create contract"
+description: "Validates extraction results, creates contract row, routes to review or validated."
+lock: ""
+kind: script
+schema:
+  $schema: "https://json-schema.org/draft/2020-12/schema"
+  type: object
+  properties:
+    extractionResult:
+      type: object
+      description: "LLM extraction result"
+    workflowId:
+      type: string
+      description: "Workflow UUID"
+    verticalId:
+      type: string
+      description: "Vertical UUID"
+    requiredFields:
+      type: array
+      items:
+        type: string
+      description: "Required field names"
+  required:
+    - extractionResult
+    - workflowId
+    - verticalId
+    - requiredFields

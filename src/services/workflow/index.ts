@@ -1,4 +1,3 @@
-import type { Database } from '../../infrastructure/db/client.js';
 import { ok, err, type Result } from '../../domain/result.js';
 import { createAppError, type AppError } from '../../domain/errors.js';
 import { logger } from '../../infrastructure/logger.js';
@@ -20,13 +19,12 @@ export { isTerminalState } from './types.js';
 const MAX_RETRIES = 3;
 
 export async function createWorkflow(
-  db: Database,
   input: CreateWorkflowInput,
 ): Promise<Result<Workflow, AppError>> {
   try {
-    const workflow = await insertWorkflow(db, input);
+    const workflow = await insertWorkflow(input);
 
-    await insertStateLog(db, {
+    await insertStateLog({
       workflowId: workflow.id,
       fromState: null,
       toState: 'pending',
@@ -44,11 +42,10 @@ export async function createWorkflow(
 }
 
 export async function getWorkflow(
-  db: Database,
   workflowId: string,
 ): Promise<Result<Workflow, AppError>> {
   try {
-    const workflow = await findWorkflowById(db, workflowId);
+    const workflow = await findWorkflowById(workflowId);
 
     if (!workflow) {
       return err(
@@ -67,12 +64,11 @@ export async function getWorkflow(
 }
 
 export async function updatePdfStoragePath(
-  db: Database,
   workflowId: string,
   pdfStoragePath: string,
 ): Promise<Result<Workflow, AppError>> {
   try {
-    const updated = await updatePdfStoragePathRepo(db, workflowId, pdfStoragePath);
+    const updated = await updatePdfStoragePathRepo(workflowId, pdfStoragePath);
     logger.debug({ workflowId, pdfStoragePath }, 'Updated workflow PDF storage path');
     return ok(updated);
   } catch (error) {
@@ -90,13 +86,12 @@ function isValidTransition(from: WorkflowState, to: WorkflowState): boolean {
 }
 
 export async function transitionState(
-  db: Database,
   workflowId: string,
   toState: WorkflowState,
   metadata?: TransitionMetadata,
 ): Promise<Result<Workflow, AppError>> {
   try {
-    const workflow = await findWorkflowById(db, workflowId);
+    const workflow = await findWorkflowById(workflowId);
 
     if (!workflow) {
       return err(
@@ -119,9 +114,9 @@ export async function transitionState(
     }
 
     const errorMsg = toState === 'failed' ? metadata?.errorMessage : undefined;
-    const updated = await updateWorkflowState(db, workflowId, toState, errorMsg);
+    const updated = await updateWorkflowState(workflowId, toState, errorMsg);
 
-    await insertStateLog(db, {
+    await insertStateLog({
       workflowId,
       fromState: workflow.state,
       toState,
@@ -144,13 +139,12 @@ export async function transitionState(
 }
 
 export async function failWorkflow(
-  db: Database,
   workflowId: string,
   errorCode: string,
   errorMessage: string,
   failedAtStep: WorkflowState,
 ): Promise<Result<Workflow, AppError>> {
-  const transitionResult = await transitionState(db, workflowId, 'failed', {
+  const transitionResult = await transitionState(workflowId, 'failed', {
     errorCode,
     errorMessage,
     failedAtStep,
@@ -161,7 +155,7 @@ export async function failWorkflow(
   }
 
   try {
-    const updated = await incrementRetryCount(db, workflowId);
+    const updated = await incrementRetryCount(workflowId);
 
     if (!updated) {
       return err(
@@ -174,7 +168,7 @@ export async function failWorkflow(
         { workflowId, retryCount: updated.retryCount, maxRetries: MAX_RETRIES },
         'Max retries exceeded, rejecting workflow',
       );
-      return transitionState(db, workflowId, 'rejected', {
+      return transitionState(workflowId, 'rejected', {
         triggeredBy: 'max_retries_exceeded',
         retryCount: updated.retryCount,
       });

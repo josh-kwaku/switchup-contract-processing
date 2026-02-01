@@ -2,8 +2,6 @@ import 'dotenv/config';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { extractTextFromPdf } from '../src/infrastructure/pdf-parser.js';
-import { LangfuseService, createLangfuseClientFromEnv } from '../src/infrastructure/langfuse.js';
-import { createLLMProvider } from '../src/infrastructure/llm/index.js';
 import { extractContractData } from '../src/services/extraction/index.js';
 import { computeFinalConfidence } from '../src/services/extraction/confidence.js';
 import { logger } from '../src/infrastructure/logger.js';
@@ -85,16 +83,8 @@ async function main(): Promise<void> {
   }
   log.info({ workflowId, textLength: textResult.value.length }, 'PDF text extracted');
 
-  // 3. Initialize dependencies
-  const langfuse = new LangfuseService(createLangfuseClientFromEnv());
-  const llm = createLLMProvider({
-    provider: 'groq',
-    apiKey: process.env.GROQ_API_KEY,
-  });
-
-  // 4. Run extraction
+  // 3. Run extraction (uses singletons internally)
   const extractionResult = await extractContractData(
-    { langfuse, llm, promptLabel: process.env.LANGFUSE_PROMPT_LABEL ?? 'production' },
     textResult.value,
     vertical,
     undefined,
@@ -106,7 +96,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // 5. Compute final confidence
+  // 4. Compute final confidence
   const confidence = computeFinalConfidence(
     extractionResult.value.llmConfidence,
     extractionResult.value.extractedData,
@@ -115,7 +105,7 @@ async function main(): Promise<void> {
     workflowId,
   );
 
-  // 6. Output result
+  // 5. Output result
   const output = {
     vertical: verticalSlug,
     model: extractionResult.value.model,

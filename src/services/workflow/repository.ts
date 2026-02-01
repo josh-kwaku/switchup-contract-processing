@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import type { Database } from '../../infrastructure/db/client.js';
+import { getDb } from '../../infrastructure/db/client.js';
 import { workflows, workflowStateLog } from '../../infrastructure/db/schema.js';
 import type { Workflow, WorkflowState } from '../../domain/types.js';
 
@@ -20,14 +20,13 @@ function toWorkflow(row: typeof workflows.$inferSelect): Workflow {
 }
 
 export async function insertWorkflow(
-  db: Database,
   input: {
     verticalId: string;
     pdfStoragePath: string;
     pdfFilename?: string;
   },
 ): Promise<Workflow> {
-  const rows = await db
+  const rows = await getDb()
     .insert(workflows)
     .values({
       verticalId: input.verticalId,
@@ -42,10 +41,9 @@ export async function insertWorkflow(
 }
 
 export async function findWorkflowById(
-  db: Database,
   id: string,
 ): Promise<Workflow | null> {
-  const rows = await db
+  const rows = await getDb()
     .select()
     .from(workflows)
     .where(eq(workflows.id, id));
@@ -54,12 +52,11 @@ export async function findWorkflowById(
 }
 
 export async function updateWorkflowState(
-  db: Database,
   id: string,
   state: WorkflowState,
   errorMessage?: string,
 ): Promise<Workflow> {
-  const rows = await db
+  const rows = await getDb()
     .update(workflows)
     .set({
       state,
@@ -73,11 +70,10 @@ export async function updateWorkflowState(
 }
 
 export async function updatePdfStoragePath(
-  db: Database,
   id: string,
   pdfStoragePath: string,
 ): Promise<Workflow> {
-  const rows = await db
+  const rows = await getDb()
     .update(workflows)
     .set({
       pdfStoragePath,
@@ -90,15 +86,14 @@ export async function updatePdfStoragePath(
 }
 
 export async function incrementRetryCount(
-  db: Database,
   id: string,
 ): Promise<Workflow | null> {
-  const current = await findWorkflowById(db, id);
+  const current = await findWorkflowById(id);
   if (!current) {
     return null;
   }
 
-  const rows = await db
+  const rows = await getDb()
     .update(workflows)
     .set({
       retryCount: current.retryCount + 1,
@@ -111,7 +106,6 @@ export async function incrementRetryCount(
 }
 
 export async function insertStateLog(
-  db: Database,
   entry: {
     workflowId: string;
     fromState: WorkflowState | null;
@@ -119,7 +113,7 @@ export async function insertStateLog(
     metadata?: Record<string, unknown>;
   },
 ): Promise<void> {
-  await db.insert(workflowStateLog).values({
+  await getDb().insert(workflowStateLog).values({
     workflowId: entry.workflowId,
     fromState: entry.fromState,
     toState: entry.toState,

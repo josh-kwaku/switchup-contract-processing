@@ -1,0 +1,444 @@
+openapi: 3.0.0
+info:
+  title: SwitchUp Contract Processing API
+  version: 1.0.0
+  description: Contract processing service with LLM extraction and human-in-the-loop review.
+
+servers:
+  - url: http://localhost:3000
+    description: Local development
+
+tags:
+  - name: workflows
+    description: Contract processing workflow operations
+  - name: reviews
+    description: Human review operations
+  - name: health
+    description: Health check endpoints
+
+components:
+  schemas:
+    ApiResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          nullable: true
+        error:
+          $ref: '#/components/schemas/ApiError'
+
+    ApiError:
+      type: object
+      nullable: true
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: string
+        retryable:
+          type: boolean
+
+    IngestRequest:
+      type: object
+      required: [pdfBase64, verticalSlug]
+      properties:
+        pdfBase64:
+          type: string
+          description: Base64-encoded PDF file
+        verticalSlug:
+          type: string
+          enum: [energy, telco, insurance]
+          description: Market vertical
+        filename:
+          type: string
+          description: Original filename (optional)
+
+    IngestResponse:
+      type: object
+      properties:
+        workflowId:
+          type: string
+          format: uuid
+        state:
+          type: string
+          example: extracting
+        pdfText:
+          type: string
+        verticalId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+
+    ExtractRequest:
+      type: object
+      required: [pdfText, verticalSlug]
+      properties:
+        pdfText:
+          type: string
+          description: Extracted PDF text
+        verticalSlug:
+          type: string
+          enum: [energy, telco, insurance]
+
+    ExtractResponse:
+      type: object
+      properties:
+        workflowId:
+          type: string
+          format: uuid
+        state:
+          type: string
+          enum: [validated, review_required]
+        extractedData:
+          type: object
+        llmConfidence:
+          type: number
+        finalConfidence:
+          type: number
+        needsReview:
+          type: boolean
+        contractId:
+          type: string
+          format: uuid
+        reviewTaskId:
+          type: string
+          format: uuid
+          description: Only present when needsReview is true
+
+    CompareResponse:
+      type: object
+      properties:
+        workflowId:
+          type: string
+          format: uuid
+        state:
+          type: string
+          example: completed
+        comparison:
+          type: object
+          properties:
+            currentTariff:
+              type: string
+            monthlyRate:
+              type: number
+              nullable: true
+            alternatives:
+              type: array
+              items:
+                type: object
+
+    ReviewRequest:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [approve, reject, correct]
+        correctedData:
+          type: object
+          description: Required when action is 'correct'
+        notes:
+          type: string
+
+    ReviewResponse:
+      type: object
+      properties:
+        workflowId:
+          type: string
+          format: uuid
+        state:
+          type: string
+          enum: [validated, rejected]
+        reviewTask:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            status:
+              type: string
+              enum: [approved, rejected, corrected]
+
+    WorkflowStatus:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        state:
+          type: string
+        verticalId:
+          type: string
+          format: uuid
+        providerId:
+          type: string
+          format: uuid
+          nullable: true
+        retryCount:
+          type: integer
+        errorMessage:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        contract:
+          type: object
+          nullable: true
+          properties:
+            id:
+              type: string
+              format: uuid
+            extractedData:
+              type: object
+            llmConfidence:
+              type: number
+            finalConfidence:
+              type: number
+
+    PendingReviewsResponse:
+      type: object
+      properties:
+        reviews:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                format: uuid
+              workflowId:
+                type: string
+                format: uuid
+              contractId:
+                type: string
+                format: uuid
+              status:
+                type: string
+              timeoutAt:
+                type: string
+                format: date-time
+                nullable: true
+              createdAt:
+                type: string
+                format: date-time
+
+paths:
+  /health:
+    get:
+      tags: [health]
+      summary: Health check
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  timestamp:
+                    type: string
+                    format: date-time
+
+  /workflows/ingest:
+    post:
+      tags: [workflows]
+      summary: Ingest a contract PDF
+      description: |
+        Receives a base64-encoded PDF, stores it, parses text,
+        creates a workflow, and transitions to 'extracting' state.
+      operationId: ingestWorkflow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IngestRequest'
+      responses:
+        '201':
+          description: Workflow created, PDF parsed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/IngestResponse'
+        '400':
+          description: Invalid PDF (corrupt, empty, too large)
+        '422':
+          description: Invalid request body
+
+  /workflows/{id}/extract:
+    post:
+      tags: [workflows]
+      summary: Run LLM extraction and validation
+      description: |
+        Fetches prompt from Langfuse, calls LLM for structured extraction,
+        validates data against provider config, creates contract record.
+        Returns needsReview flag for Windmill branching.
+      operationId: extractWorkflow
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExtractRequest'
+      responses:
+        '200':
+          description: Extraction complete
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ExtractResponse'
+        '404':
+          description: Workflow not found
+        '422':
+          description: Invalid request body
+        '503':
+          description: LLM or database unavailable (retryable)
+
+  /workflows/{id}/compare:
+    post:
+      tags: [workflows]
+      summary: Run tariff comparison (mock)
+      description: |
+        Performs a mock tariff comparison to demonstrate extensibility.
+        Transitions workflow to 'completed' state.
+      operationId: compareWorkflow
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Comparison complete
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/CompareResponse'
+        '404':
+          description: Workflow not found
+        '409':
+          description: Invalid state transition
+
+  /workflows/{id}/review:
+    post:
+      tags: [reviews]
+      summary: Record a review decision
+      description: |
+        Records a human reviewer's decision (approve, reject, or correct).
+        On approve/correct, transitions workflow to 'validated'.
+        On reject, transitions to 'rejected' (terminal).
+      operationId: reviewWorkflow
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewRequest'
+      responses:
+        '200':
+          description: Review recorded
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ReviewResponse'
+        '404':
+          description: Workflow or review task not found
+        '409':
+          description: Workflow not in review_required state
+        '422':
+          description: Invalid request body
+
+  /workflows/{id}:
+    get:
+      tags: [workflows]
+      summary: Get workflow status
+      operationId: getWorkflow
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Workflow details
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/WorkflowStatus'
+        '404':
+          description: Workflow not found
+
+  /reviews/pending:
+    get:
+      tags: [reviews]
+      summary: List pending review tasks
+      operationId: getPendingReviews
+      responses:
+        '200':
+          description: Pending reviews
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PendingReviewsResponse'

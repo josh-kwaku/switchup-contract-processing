@@ -1,5 +1,5 @@
 import { eq, and, lt } from 'drizzle-orm';
-import type { Database } from '../../infrastructure/db/client.js';
+import { getDb } from '../../infrastructure/db/client.js';
 import { reviewTasks } from '../../infrastructure/db/schema.js';
 import type { ReviewTask, ReviewStatus } from '../../domain/types.js';
 import type { CreateReviewTaskInput } from './types.js';
@@ -20,10 +20,9 @@ function toReviewTask(row: typeof reviewTasks.$inferSelect): ReviewTask {
 }
 
 export async function insertReviewTask(
-  db: Database,
   input: CreateReviewTaskInput,
 ): Promise<ReviewTask> {
-  const rows = await db
+  const rows = await getDb()
     .insert(reviewTasks)
     .values({
       workflowId: input.workflowId,
@@ -37,10 +36,9 @@ export async function insertReviewTask(
 }
 
 export async function findReviewTaskById(
-  db: Database,
   id: string,
 ): Promise<ReviewTask | null> {
-  const rows = await db
+  const rows = await getDb()
     .select()
     .from(reviewTasks)
     .where(eq(reviewTasks.id, id));
@@ -48,10 +46,8 @@ export async function findReviewTaskById(
   return rows.length > 0 ? toReviewTask(rows[0]) : null;
 }
 
-export async function findPendingReviewTasks(
-  db: Database,
-): Promise<ReviewTask[]> {
-  const rows = await db
+export async function findPendingReviewTasks(): Promise<ReviewTask[]> {
+  const rows = await getDb()
     .select()
     .from(reviewTasks)
     .where(eq(reviewTasks.status, 'pending'));
@@ -60,10 +56,9 @@ export async function findPendingReviewTasks(
 }
 
 export async function findTimedOutReviewTasks(
-  db: Database,
   now: Date,
 ): Promise<ReviewTask[]> {
-  const rows = await db
+  const rows = await getDb()
     .select()
     .from(reviewTasks)
     .where(
@@ -77,7 +72,6 @@ export async function findTimedOutReviewTasks(
 }
 
 export async function updateReviewTaskStatus(
-  db: Database,
   id: string,
   status: ReviewStatus,
   data?: {
@@ -85,7 +79,7 @@ export async function updateReviewTaskStatus(
     reviewerNotes?: string;
   },
 ): Promise<ReviewTask | null> {
-  const rows = await db
+  const rows = await getDb()
     .update(reviewTasks)
     .set({
       status,

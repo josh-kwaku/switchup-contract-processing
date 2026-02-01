@@ -1,4 +1,3 @@
-import type { Database } from '../../infrastructure/db/client.js';
 import { ok, err, type Result } from '../../domain/result.js';
 import { createAppError, type AppError } from '../../domain/errors.js';
 import { logger } from '../../infrastructure/logger.js';
@@ -14,16 +13,15 @@ import {
 export type { MergedConfig } from './types.js';
 
 export async function getVertical(
-  db: Database,
   slug: string,
 ): Promise<Result<Vertical, AppError>> {
   try {
-    const vertical = await findVerticalBySlug(db, slug);
+    const vertical = await findVerticalBySlug(slug);
 
     if (!vertical) {
       logger.warn({ slug }, 'Vertical not found');
       return err(
-        createAppError('PROVIDER_NOT_FOUND', `Vertical '${slug}' not found`, false),
+        createAppError('VERTICAL_NOT_FOUND', `Vertical '${slug}' not found`, false),
       );
     }
 
@@ -38,12 +36,11 @@ export async function getVertical(
 }
 
 export async function findProvider(
-  db: Database,
   slug: string,
   verticalId: string,
 ): Promise<Result<Provider | null, AppError>> {
   try {
-    const provider = await findProviderBySlug(db, slug, verticalId);
+    const provider = await findProviderBySlug(slug, verticalId);
 
     if (!provider) {
       logger.debug({ slug, verticalId }, 'Provider not found');
@@ -60,16 +57,15 @@ export async function findProvider(
 }
 
 export async function getMergedConfig(
-  db: Database,
   verticalId: string,
   providerId?: string,
 ): Promise<Result<MergedConfig, AppError>> {
   try {
-    const vertical = await findVerticalById(db, verticalId);
+    const vertical = await findVerticalById(verticalId);
 
     if (!vertical) {
       return err(
-        createAppError('PROVIDER_NOT_FOUND', `Vertical with id '${verticalId}' not found`, false),
+        createAppError('VERTICAL_NOT_FOUND', `Vertical with id '${verticalId}' not found`, false),
       );
     }
 
@@ -84,7 +80,7 @@ export async function getMergedConfig(
       return ok(baseConfig);
     }
 
-    const config = await findActiveProviderConfig(db, providerId);
+    const config = await findActiveProviderConfig(providerId);
 
     if (!config) {
       logger.debug({ verticalId, providerId }, 'No provider config found, using vertical defaults');

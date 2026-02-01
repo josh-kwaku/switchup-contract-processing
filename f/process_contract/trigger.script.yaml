@@ -1,0 +1,20 @@
+summary: "Receive contract and create workflow"
+description: "Validates input, looks up vertical, creates workflow row, stores PDF reference."
+lock: ""
+kind: script
+schema:
+  $schema: "https://json-schema.org/draft/2020-12/schema"
+  type: object
+  properties:
+    pdfBase64:
+      type: string
+      description: "Base64-encoded PDF contract"
+    verticalSlug:
+      type: string
+      description: "Vertical identifier (energy, telco, insurance)"
+    filename:
+      type: string
+      description: "Optional original filename"
+  required:
+    - pdfBase64
+    - verticalSlug

@@ -1,9 +1,33 @@
 import { describe, it, expect, vi } from 'vitest';
-import { extractContractData, type ExtractionDeps } from '../../src/services/extraction/index.js';
 import { ok, err } from '../../src/domain/result.js';
 import { createAppError, ErrorCode } from '../../src/domain/errors.js';
 import type { Vertical } from '../../src/domain/types.js';
 import type { LLMResponse } from '../../src/infrastructure/llm/types.js';
+
+// Mock infrastructure singletons before importing the module under test
+vi.mock('../../src/infrastructure/langfuse.js', () => {
+  const getPrompt = vi.fn().mockResolvedValue(ok({
+    name: 'contract-extraction-energy',
+    prompt: 'Extract from {{contract_text}} for {{vertical}}',
+    config: {},
+  }));
+  const traceGeneration = vi.fn();
+  const warmCache = vi.fn();
+  return {
+    getLangfuse: () => ({ getPrompt, traceGeneration, warmCache }),
+    // expose for test assertions
+    __mocks: { getPrompt, traceGeneration },
+  };
+});
+
+const mockChat = vi.fn();
+vi.mock('../../src/infrastructure/llm/index.js', () => ({
+  getLlm: () => ({ chat: mockChat }),
+}));
+
+// Now import the module under test (after mocks are set up)
+const { extractContractData } = await import('../../src/services/extraction/index.js');
+const langfuseMocks = (await import('../../src/infrastructure/langfuse.js') as unknown as { __mocks: { getPrompt: ReturnType<typeof vi.fn>; traceGeneration: ReturnType<typeof vi.fn> } }).__mocks;
 
 const testVertical: Vertical = {
   id: 'v1',
@@ -31,30 +55,14 @@ function makeLlmResponse(content: string): LLMResponse {
   };
 }
 
-function createMockDeps(overrides?: Partial<ExtractionDeps>): ExtractionDeps {
-  return {
-    langfuse: {
-      getPrompt: vi.fn().mockResolvedValue(ok({
-        name: 'contract-extraction-energy',
-        prompt: 'Extract from {{contract_text}} for {{vertical}}',
-        config: {},
-      })),
-      traceGeneration: vi.fn(),
-      warmCache: vi.fn(),
-    } as unknown as ExtractionDeps['langfuse'],
-    llm: {
-      chat: vi.fn().mockResolvedValue(ok(makeLlmResponse(validJson))),
-    },
-    promptLabel: 'production',
-    ...overrides,
-  };
-}
-
 describe('extractContractData', () => {
-  it('returns ExtractionResult on valid JSON response', async () => {
-    const deps = createMockDeps();
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockChat.mockResolvedValue(ok(makeLlmResponse(validJson)));
+  });
 
-    const result = await extractContractData(deps, 'pdf text here', testVertical);
+  it('returns ExtractionResult on valid JSON response', async () => {
+    const result = await extractContractData('pdf text here', testVertical);
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -65,30 +73,26 @@ describe('extractContractData', () => {
     });
     expect(result.value.llmConfidence).toBe(85);
     expect(result.value.model).toBe('llama-3.3-70b-versatile');
-    expect(deps.langfuse.traceGeneration).toHaveBeenCalled();
+    expect(langfuseMocks.traceGeneration).toHaveBeenCalled();
   });
 
   it('retries once on malformed JSON and succeeds on second attempt', async () => {
-    const chat = vi.fn()
+    mockChat
       .mockResolvedValueOnce(ok(makeLlmResponse('not json {')))
       .mockResolvedValueOnce(ok(makeLlmResponse(validJson)));
 
-    const deps = createMockDeps({ llm: { chat } });
-
-    const result = await extractContractData(deps, 'pdf text', testVertical);
+    const result = await extractContractData('pdf text', testVertical);
 
     expect(result.ok).toBe(true);
-    expect(chat).toHaveBeenCalledTimes(2);
+    expect(mockChat).toHaveBeenCalledTimes(2);
   });
 
   it('returns LLM_MALFORMED_RESPONSE when both attempts return bad JSON', async () => {
-    const chat = vi.fn()
+    mockChat
       .mockResolvedValueOnce(ok(makeLlmResponse('bad json 1')))
       .mockResolvedValueOnce(ok(makeLlmResponse('bad json 2')));
 
-    const deps = createMockDeps({ llm: { chat } });
-
-    const result = await extractContractData(deps, 'pdf text', testVertical);
+    const result = await extractContractData('pdf text', testVertical);
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -97,17 +101,11 @@ describe('extractContractData', () => {
   });
 
   it('returns error when Langfuse prompt fetch fails', async () => {
-    const langfuse = {
-      getPrompt: vi.fn().mockResolvedValue(
-        err(createAppError(ErrorCode.LANGFUSE_UNAVAILABLE, 'down', true)),
-      ),
-      traceGeneration: vi.fn(),
-      warmCache: vi.fn(),
-    } as unknown as ExtractionDeps['langfuse'];
+    langfuseMocks.getPrompt.mockResolvedValueOnce(
+      err(createAppError(ErrorCode.LANGFUSE_UNAVAILABLE, 'down', true)),
+    );
 
-    const deps = createMockDeps({ langfuse });
-
-    const result = await extractContractData(deps, 'pdf text', testVertical);
+    const result = await extractContractData('pdf text', testVertical);
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
