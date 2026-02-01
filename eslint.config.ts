@@ -19,6 +19,6 @@ export default tseslint.config(
     },
   },
   {
-    ignores: ['dist/', 'db/migrations/', 'node_modules/', 'test/', 'f/', 'src/workflows/scripts/', 'src/workflows/triggers/'],
+    ignores: ['dist/', 'db/migrations/', 'node_modules/', 'test/', 'f/'],
   },
 );

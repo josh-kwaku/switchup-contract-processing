@@ -46,13 +46,16 @@ Create these as **variables** in Windmill (Settings → Variables, or via CLI). 
 
 ### Via CLI
 
+Replace `<username>` with your Windmill username:
+
 ```bash
-wmill variable create u/kwakujosh/DATABASE_URL --value "$DATABASE_URL"
-wmill variable create u/kwakujosh/GROQ_API_KEY --value "$GROQ_API_KEY" --secret
-wmill variable create u/kwakujosh/LANGFUSE_PUBLIC_KEY --value "$LANGFUSE_PUBLIC_KEY"
-wmill variable create u/kwakujosh/LANGFUSE_SECRET_KEY --value "$LANGFUSE_SECRET_KEY" --secret
-wmill variable create u/kwakujosh/LANGFUSE_BASE_URL --value "$LANGFUSE_BASE_URL"
-wmill variable create u/kwakujosh/LLM_PROVIDER --value "groq"
+wmill variable create u/<username>/DATABASE_URL --value "$DATABASE_URL"
+wmill variable create u/<username>/GROQ_API_KEY --value "$GROQ_API_KEY" --secret
+wmill variable create u/<username>/LANGFUSE_PUBLIC_KEY --value "$LANGFUSE_PUBLIC_KEY"
+wmill variable create u/<username>/LANGFUSE_SECRET_KEY --value "$LANGFUSE_SECRET_KEY" --secret
+wmill variable create u/<username>/LANGFUSE_BASE_URL --value "$LANGFUSE_BASE_URL"
+wmill variable create u/<username>/LLM_PROVIDER --value "groq"
+wmill variable create f/process_contract/SERVICE_URL --value "http://host.docker.internal:3000"
 ```
 
 ### Via UI
@@ -62,23 +65,36 @@ wmill variable create u/kwakujosh/LLM_PROVIDER --value "groq"
 3. Create each variable with the path and value from your `.env` file
 4. Mark API keys as **secret**
 
-## 5. Verify
+## 5. Deploy scripts and flow
+
+Push the thin HTTP caller scripts and the flow definition to Windmill:
+
+```bash
+# Push scripts (from project root)
+wmill sync push --yes
+
+# Push the flow separately (sync push doesn't handle flows in f/)
+# Replace <username> with your Windmill username
+wmill flow push f/process-contract.flow u/<username>/process_contract
+```
+
+The scripts land at `f/process_contract/*` (synced from the `f/` directory). The flow must be pushed to a user-scoped path (`u/<username>/`) because Windmill's `proper_id` constraint requires a registered namespace.
+
+## 6. Verify
 
 1. Windmill UI loads at http://localhost:8000
 2. Login with default credentials
 3. Variables are visible under Settings → Variables
-4. Create a test script to verify variable access:
+4. Scripts visible under **Scripts** → `f/process_contract/` folder
+5. Flow visible under **Flows** → `u/<username>/process_contract`
+6. Start the Express service (`npm run dev`) and trigger the flow with a test PDF:
+   ```bash
+   # Generate base64 from a test PDF
+   base64 -w0 test/fixtures/vattenfall-energy.pdf | pbcopy  # or xclip
+   ```
+   Then run the flow in Windmill UI with `pdfBase64` and `verticalSlug: energy`.
 
-```typescript
-import * as wmill from "windmill-client";
-
-export async function main() {
-  const dbUrl = await wmill.getVariable("u/kwakujosh/DATABASE_URL");
-  return { hasDbUrl: !!dbUrl };
-}
-```
-
-## 6. Stop Windmill
+## 7. Stop Windmill
 
 ```bash
 docker-compose down

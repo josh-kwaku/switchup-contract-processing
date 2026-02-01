@@ -1,0 +1,84 @@
+summary: Process Contract
+description: >
+  Contract processing pipeline. Windmill orchestrates thin HTTP callers
+  that delegate all business logic to the Express service (ADR-002).
+  Steps: ingest → extract (+ validate) → branch (compare or human review).
+value:
+  modules:
+    # Step 1: Ingest — store PDF, parse text, create workflow
+    - id: ingest
+      summary: Ingest PDF contract
+      value:
+        type: script
+        path: f/process_contract/ingest
+        input_transforms:
+          pdfBase64:
+            type: javascript
+            expr: flow_input.pdfBase64
+          verticalSlug:
+            type: javascript
+            expr: flow_input.verticalSlug
+          filename:
+            type: javascript
+            expr: flow_input.filename
+
+    # Step 2: Extract — LLM extraction + validation + contract creation
+    # Returns needsReview flag for branching
+    - id: extract
+      summary: Extract and validate contract data via LLM
+      value:
+        type: script
+        path: f/process_contract/extract
+        input_transforms:
+          workflowId:
+            type: javascript
+            expr: results.ingest.workflowId
+          pdfText:
+            type: javascript
+            expr: results.ingest.pdfText
+          verticalSlug:
+            type: javascript
+            expr: flow_input.verticalSlug
+
+    # Step 3: Branch on review requirement
+    - id: review_branch
+      summary: Route based on review requirement
+      value:
+        type: branchone
+        default:
+          # Default path: no review needed → compare tariffs
+          - id: compare
+            summary: Compare tariffs (mock)
+            value:
+              type: script
+              path: f/process_contract/compare
+              input_transforms:
+                workflowId:
+                  type: javascript
+                  expr: results.extract.workflowId
+        branches:
+          - summary: Needs human review
+            expr: results.extract.needsReview === true
+            modules: []
+            # Sprint 5: suspend/resume for human review
+
+schema:
+  $schema: "https://json-schema.org/draft/2020-12/schema"
+  type: object
+  properties:
+    pdfBase64:
+      type: string
+      description: Base64-encoded PDF contract
+    verticalSlug:
+      type: string
+      description: Vertical identifier (energy, telco, insurance)
+    filename:
+      type: string
+      description: Optional original filename
+  required:
+    - pdfBase64
+    - verticalSlug
+  order:
+    - pdfBase64
+    - verticalSlug
+    - filename

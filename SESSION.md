@@ -1,29 +1,44 @@
 # Current Session
 
-**Date**: 2026-02-01
-**Focus**: Sprint 4 — Task 4.3 complete, thin Windmill scripts
+**Date**: 2026-02-02
+**Focus**: Sprint 4 complete — Task 4.4 flow YAML + deploy + stale code cleanup
 
 ---
 
 ## Accomplished
 
-### Task 4.3: Thin Windmill Scripts (Complete)
+### Task 4.4: Windmill Flow Definition + Deploy (Complete)
 
-Replaced old Windmill scripts (~340 lines of duplicated logic) with 4 thin HTTP callers (~60 lines total):
+Rewrote flow YAML, deployed to local Windmill, cleaned up all stale code.
 
-**New scripts:**
-- `f/process_contract/ingest.ts` — `POST /workflows/ingest` (15 lines)
-- `f/process_contract/extract.ts` — `POST /workflows/:id/extract` (15 lines)
-- `f/process_contract/compare.ts` — `POST /workflows/:id/compare` (14 lines)
-- `f/process_contract/handle_review.ts` — `POST /workflows/:id/review` (20 lines)
+**Flow (`f/process-contract.flow/flow.yaml`):**
+- 3-module flow: `ingest` → `extract` → `review_branch` (with `compare` as default path)
+- References thin HTTP callers in `f/process_contract/`
+- Review branch empty (Sprint 5 suspend/resume)
 
-Each has a `.script.yaml` with Windmill metadata.
+**Deployment:**
+- Scripts: `wmill sync push --yes`
+- Flow: `wmill flow push f/process-contract.flow u/<username>/process_contract`
+- Flow must use user-scoped path due to Windmill `proper_id` constraint
 
-**Deleted old scripts:** `lib.ts` (250 lines DB/state/validation), `trigger.ts`, `parse_pdf.ts`, `extract_data.ts`, `validate_data.ts`, `compare_tariffs.ts` + all associated YAML/lock files.
+**Stale code deleted (TD-002):**
+- `src/workflows/scripts/` (5 files)
+- `src/workflows/triggers/` (1 file)
+- `src/workflows/process-contract.flow/` (old flow YAML)
+- `src/workflows/` directory removed entirely
 
-**Also deleted:** `src/workflows/.gitkeep` (stale, partial TD-002 cleanup)
+**Config cleanup:**
+- `eslint.config.ts` — removed stale `src/workflows/` ignores
+- `tsconfig.json` — removed `@workflows/*` path alias and stale excludes
 
-**Code review:** No critical issues. Retryable vs non-retryable error distinction deferred to Sprint 6 Task 6.1.
+**Variable scope fix:**
+- Moved `SERVICE_URL` from `u/kwakujosh/` to `f/process_contract/SERVICE_URL` (folder-scoped, generic)
+- Updated all 4 scripts to use folder-scoped variable path
+
+**Docs:**
+- Updated `docs/guides/WINDMILL_SETUP.md` with deploy commands, generic `<username>` placeholders, SERVICE_URL variable
+
+**Verified:** End-to-end flow runs successfully in local Windmill → Express service.
 
 ---
 
@@ -31,7 +46,7 @@ Each has a `.script.yaml` with Windmill metadata.
 - Sprint 1 complete (Tasks 1.1–1.6): project scaffolding, domain types, logger, Drizzle schema, DB client, migrations, seed, ESLint, pre-commit, provider registry service
 - Sprint 2 complete (Tasks 2.1–2.7): PDF parser, Langfuse module, Langfuse prompts, Groq LLM provider, extraction service, confidence scoring, end-to-end extraction script
 - Sprint 3 complete (Tasks 3.1–3.4): PDF storage module, workflow state transition service, contract and review task services, validation service
-- Sprint 4 partially complete: Task 4.1 done (Windmill env), Task 4.2 done (HTTP API), Task 4.3 done (thin scripts)
+- Sprint 4 complete (Tasks 4.1–4.4): Windmill env, HTTP API, thin scripts, flow definition + deploy
 - Design phase complete: PRD, technical design, schema, state machine, error handling, guidelines, subagent, ADRs
 - Sprint plan finalized (v3): 7 sprints, 31 tasks
 - GitHub repo created with issues and project board
@@ -40,7 +55,7 @@ Each has a `.script.yaml` with Windmill metadata.
 
 ## Next Steps
 
-- Task 4.4: Create 4-step flow YAML + deploy, clean up stale code (TD-001 resolved, TD-002 remaining)
+- Sprint 5, Task 5.1: Implement Windmill suspend/resume for human review
 
 ---
 

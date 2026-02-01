@@ -18,10 +18,9 @@
       "@domain/*": ["./src/domain/*"],
       "@services/*": ["./src/services/*"],
       "@infrastructure/*": ["./src/infrastructure/*"],
-      "@workflows/*": ["./src/workflows/*"]
     },
     "baseUrl": "."
   },
   "include": ["src/**/*.ts", "scripts/**/*.ts", "drizzle.config.ts"],
-  "exclude": ["node_modules", "dist", "test", "src/workflows/scripts", "src/workflows/triggers"]
+  "exclude": ["node_modules", "dist", "test"]
 }

@@ -1,7 +1,7 @@
 import * as wmill from "windmill-client@1";
 
 export async function main(pdfBase64: string, verticalSlug: string, filename?: string) {
-  const serviceUrl = await wmill.getVariable("u/kwakujosh/SERVICE_URL");
+  const serviceUrl = await wmill.getVariable("f/process_contract/SERVICE_URL");
 
   const res = await fetch(`${serviceUrl}/workflows/ingest`, {
     method: "POST",

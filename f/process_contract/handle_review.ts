@@ -6,7 +6,7 @@ export async function main(
   correctedData?: Record<string, unknown>,
   notes?: string,
 ) {
-  const serviceUrl = await wmill.getVariable("u/kwakujosh/SERVICE_URL");
+  const serviceUrl = await wmill.getVariable("f/process_contract/SERVICE_URL");
 
   const res = await fetch(`${serviceUrl}/workflows/${workflowId}/review`, {
     method: "POST",
