@@ -5,7 +5,7 @@
 SwitchUp Contract Processing System — portfolio demo for Senior Fullstack Engineer application.
 
 **Timeline**: 6-8 hours using Claude Code
-**Current Phase**: Sprint 1 Complete (Tasks 1.1–1.6 complete)
+**Current Phase**: Sprint 2 In Progress (Tasks 2.1–2.2 complete)
 
 ---
 
@@ -36,8 +36,8 @@ SwitchUp Contract Processing System — portfolio demo for Senior Fullstack Engi
 - [x] Task 1.6: Create provider registry service
 
 ### Sprint 2: PDF Parsing + LLM Extraction Pipeline
-- [ ] Task 2.1: Create PDF parser infrastructure module
-- [ ] Task 2.2: Create Langfuse infrastructure module
+- [x] Task 2.1: Create PDF parser infrastructure module
+- [x] Task 2.2: Create Langfuse infrastructure module
 - [ ] Task 2.3: Set up Langfuse account and create prompts
 - [ ] Task 2.4: Create LLM provider infrastructure — Groq adapter
 - [ ] Task 2.5: Create extraction service

@@ -151,6 +151,7 @@ Use plain functions and modules. Only use classes when OOP genuinely simplifies 
 
 **When classes may be appropriate:**
 - Managing stateful connections (database client)
+- Infrastructure services with injected clients and internal state (e.g., `LangfuseService` with cache + client)
 - The LLM provider adapter interface (implemented as classes for polymorphism)
 
 ```typescript
@@ -172,6 +173,36 @@ export class GroqProvider implements LLMProvider {
 ```
 
 **Note**: Types, interfaces, and Zod schemas are fine — these define structure, not behavior.
+
+### Favor Dependency Injection
+
+Modules that depend on external clients (Langfuse, LLM providers, database) must accept dependencies as parameters rather than constructing them internally or using module-level singletons.
+
+**Why:**
+- Tests inject mocks directly — no `vi.mock()`, no `_resetForTesting()` hacks
+- Each instance owns its own state — no shared mutable globals
+- Callers control lifecycle and configuration
+
+**Pattern:** Use a factory function that accepts dependencies and returns a service object.
+
+```typescript
+// GOOD — Factory with injected dependency
+export function createLangfuseService(client: LangfuseClient): LangfuseService {
+  const cache = new Map();
+  return {
+    getPrompt(name) { /* uses client and cache */ },
+  };
+}
+
+// BAD — Module-level singleton with test-only reset
+let client: Langfuse | null = null;
+function getClient() { /* lazy init from env vars */ }
+export function _resetForTesting() { client = null; } // never do this
+```
+
+Provide a convenience factory (e.g., `createLangfuseClientFromEnv()`) for production wiring, separate from the service logic.
+
+**Exception:** The Pino logger singleton (`src/infrastructure/logger.ts`) is exempt. Loggers are passive observability — not business logic — and injecting them into every function adds noise for little testability gain. Use `LOG_LEVEL=silent` in tests to suppress output.
 
 ### Keep Functions Focused
 
@@ -247,6 +278,7 @@ Before submitting code, verify:
 - [ ] Input validation uses Zod schemas at boundaries
 - [ ] Database access goes through services only
 - [ ] Functions used instead of classes (unless polymorphism needed)
+- [ ] External dependencies injected via factory functions (no module-level singletons)
 - [ ] Functions do one thing and have clear, specific names
 - [ ] Logs are structured (JSON) with workflowId context
 - [ ] Error codes defined centrally and used consistently

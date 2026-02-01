@@ -26,6 +26,7 @@
     "@neondatabase/serverless": "^1.0.2",
     "dotenv": "^17.2.3",
     "drizzle-orm": "^0.45.1",
+    "langfuse": "^3.38.6",
     "pdfjs-dist": "^5.4.530",
     "pino": "^10.3.0",
     "typescript": "^5.9.3",
