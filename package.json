@@ -1,0 +1,32 @@
+{
+  "name": "switchup-contract-processing",
+  "version": "0.1.0",
+  "description": "AI-powered contract processing system with multi-vertical support",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "author": "Joshua Boateng",
+  "license": "MIT",
+  "dependencies": {
+    "@neondatabase/serverless": "^1.0.2",
+    "dotenv": "^17.2.3",
+    "drizzle-orm": "^0.45.1",
+    "pino": "^10.3.0",
+    "typescript": "^5.9.3",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.1.0",
+    "drizzle-kit": "^0.31.8",
+    "tsx": "^4.21.0",
+    "vitest": "^4.0.18"
+  }
+}
