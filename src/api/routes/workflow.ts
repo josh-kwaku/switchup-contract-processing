@@ -9,6 +9,7 @@ import * as validationService from '../../services/validation/index.js';
 import * as contractService from '../../services/contract/index.js';
 import * as reviewService from '../../services/review/index.js';
 import * as ingestService from '../../services/ingest/index.js';
+import { logger } from '../../infrastructure/logger.js';
 
 function paramString(val: string | string[]): string {
   return Array.isArray(val) ? val[0] : val;
@@ -231,35 +232,50 @@ router.post('/workflows/:id/review', async (req: Request, res: Response) => {
   const { action } = parsed.data;
   let reviewResult;
 
-  if (action === 'approve') {
-    reviewResult = await reviewService.approveReview(reviewTask.id, parsed.data.notes);
-  } else if (action === 'reject') {
-    reviewResult = await reviewService.rejectReview(reviewTask.id, parsed.data.notes);
-  } else {
-    reviewResult = await reviewService.correctReview(reviewTask.id, {
-      correctedData: parsed.data.correctedData,
-      reviewerNotes: parsed.data.notes,
-    });
+  logger.info({ workflowId, reviewTaskId: reviewTask.id, action }, 'Processing review action');
 
-    if (reviewResult.ok) {
+  switch (action) {
+    case 'approve':
+      reviewResult = await reviewService.approveReview(reviewTask.id, parsed.data.notes);
+      break;
+
+    case 'reject':
+      reviewResult = await reviewService.rejectReview(reviewTask.id, parsed.data.notes);
+      break;
+
+    case 'correct': {
+      // Update contract data first — if this fails, we avoid marking
+      // the review as corrected with stale contract data.
       const updateResult = await contractService.updateContractData(reviewTask.contractId, {
         extractedData: parsed.data.correctedData,
         finalConfidence: 100,
       });
       if (!updateResult.ok) return sendAppError(res, updateResult.error);
+
+      reviewResult = await reviewService.correctReview(reviewTask.id, {
+        correctedData: parsed.data.correctedData,
+        reviewerNotes: parsed.data.notes,
+      });
+      break;
     }
+
+    case 'timeout':
+      reviewResult = await reviewService.timeoutReview(reviewTask.id);
+      break;
   }
 
   if (!reviewResult.ok) return sendAppError(res, reviewResult.error);
 
-  if (action === 'reject') {
-    const t = await workflowService.transitionState(workflowId, 'rejected', { triggeredBy: 'human_review' });
+  // Terminal actions: reject and timeout
+  if (action === 'reject' || action === 'timeout') {
+    const targetState = action === 'reject' ? 'rejected' as const : 'timed_out' as const;
+    const t = await workflowService.transitionState(workflowId, targetState, { triggeredBy: 'human_review' });
     if (!t.ok) return sendAppError(res, t.error);
 
     res.json(successResponse({
       workflowId,
-      state: 'rejected',
-      reviewTask: { id: reviewTask.id, status: 'rejected' },
+      state: targetState,
+      reviewTask: { id: reviewTask.id, status: reviewResult.value.status },
     }));
     return;
   }

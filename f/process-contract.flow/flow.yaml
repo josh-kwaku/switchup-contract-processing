@@ -63,6 +63,7 @@ value:
               # Step A: Suspend flow and present approval form
               - id: approval
                 summary: Wait for human review decision
+                continue_on_error: true
                 value:
                   type: rawscript
                   language: bun
@@ -99,45 +100,65 @@ value:
                       required:
                         - action
 
-              # Step B: Send review decision to Express service
-              - id: handle_review
-                summary: Process review decision
-                value:
-                  type: script
-                  path: f/process_contract/handle_review
-                  input_transforms:
-                    workflowId:
-                      type: javascript
-                      expr: results.extract.workflowId
-                    action:
-                      type: javascript
-                      expr: resume.action
-                    correctedData:
-                      type: javascript
-                      expr: resume.correctedData ?? null
-                    notes:
-                      type: javascript
-                      expr: resume.notes ?? null
-
-              # Step C: Branch on review outcome
-              - id: review_result_branch
-                summary: Route based on review outcome
+              # Step B: Branch — timeout (error) vs reviewer action
+              - id: timeout_branch
+                summary: Check if approval timed out
                 value:
                   type: branchone
                   default:
-                    - id: compare_after_review
-                      summary: Compare tariffs after approved review
+                    # Normal resume path — reviewer responded
+                    - id: handle_review
+                      summary: Process review decision
                       value:
                         type: script
-                        path: f/process_contract/compare
+                        path: f/process_contract/handle_review
                         input_transforms:
                           workflowId:
                             type: javascript
                             expr: results.extract.workflowId
+                          action:
+                            type: javascript
+                            expr: resume.action
+                          correctedData:
+                            type: javascript
+                            expr: resume.correctedData ?? null
+                          notes:
+                            type: javascript
+                            expr: resume.notes ?? null
+
+                    # Step C: Branch on review outcome
+                    - id: review_result_branch
+                      summary: Route based on review outcome
+                      value:
+                        type: branchone
+                        default:
+                          - id: compare_after_review
+                            summary: Compare tariffs after approved review
+                            value:
+                              type: script
+                              path: f/process_contract/compare
+                              input_transforms:
+                                workflowId:
+                                  type: javascript
+                                  expr: results.extract.workflowId
+                        branches:
+                          - summary: Rejected — skip compare
+                            expr: results.handle_review.state === 'rejected'
+                            modules: []
+
                   branches:
-                    - summary: Rejected — skip compare
-                      expr: results.handle_review.state === 'rejected'
-                      modules: []
+                    - summary: Timed out — no reviewer response
+                      expr: results.approval != null && results.approval.error != null
+                      modules:
+                        - id: handle_timeout
+                          summary: Process review timeout
+                          value:
+                            type: script
+                            path: f/process_contract/handle_timeout
+                            input_transforms:
+                              workflowId:
+                                type: javascript
+                                expr: results.extract.workflowId
 
 schema:
   $schema: "https://json-schema.org/draft/2020-12/schema"

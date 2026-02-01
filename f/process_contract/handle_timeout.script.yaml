@@ -1,0 +1,13 @@
+summary: "Handle review timeout"
+description: "Calls service POST /workflows/:id/review with action=timeout when approval step times out."
+lock: ""
+kind: script
+schema:
+  $schema: "https://json-schema.org/draft/2020-12/schema"
+  type: object
+  properties:
+    workflowId:
+      type: string
+      description: "Workflow ID"
+  required:
+    - workflowId

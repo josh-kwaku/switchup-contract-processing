@@ -19,6 +19,7 @@ export const reviewActionInput = z.discriminatedUnion('action', [
     correctedData: z.record(z.string(), z.unknown()),
     notes: z.string().optional(),
   }),
+  z.object({ action: z.literal('timeout') }),
 ]);
 
 export const extractRequestInput = z.object({
