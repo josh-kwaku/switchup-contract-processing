@@ -39,7 +39,7 @@ SwitchUp Contract Processing System — portfolio demo for Senior Fullstack Engi
 - [x] Task 2.1: Create PDF parser infrastructure module
 - [x] Task 2.2: Create Langfuse infrastructure module
 - [ ] Task 2.3: Set up Langfuse account and create prompts
-- [ ] Task 2.4: Create LLM provider infrastructure — Groq adapter
+- [x] Task 2.4: Create LLM provider infrastructure — Groq adapter
 - [ ] Task 2.5: Create extraction service
 - [ ] Task 2.6: Create confidence scoring module
 - [ ] Task 2.7: Create end-to-end extraction script
