@@ -296,6 +296,9 @@ Save uploaded PDFs so reviewers can reference the original document.
 - Store a PDF → file exists at returned path
 - Retrieve → contents match original
 
+**Note**
+In a production app, the pdfs will be stored in an object storage. But for the purposes of this demo, we keep them in the project folder.
+
 ---
 
 ### Task 3.2: Create Workflow State Transition Service

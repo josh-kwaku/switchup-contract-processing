@@ -97,6 +97,11 @@ export interface ReviewTask {
   updatedAt: Date;
 }
 
+export interface StoredPdf {
+  path: string;
+  sizeBytes: number;
+}
+
 export interface WorkflowStateLog {
   id: string;
   workflowId: string;
