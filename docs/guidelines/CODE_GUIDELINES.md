@@ -177,10 +177,17 @@ Orchestration functions (like `processContract`) may be longer because they coor
 
 Comments should explain *why*, not *what*. If you need a comment to explain what code does, the code should probably be refactored.
 
+**Never use banner/separator comments** like `// ========`, `// ------`, or `// *** SECTION ***`. Use whitespace and module structure to organize code instead.
+
 ```typescript
 // BAD
 // Get the vertical from the database
 const vertical = await getVertical(slug);
+
+// BAD — banner comment
+// ============================================
+// REFERENCE DATA
+// ============================================
 
 // GOOD
 // Fall back to vertical defaults when provider has no custom config

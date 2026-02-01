@@ -32,6 +32,7 @@ export interface Vertical {
   baseRequiredFields: string[];
   active: boolean;
   createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface Provider {
@@ -42,6 +43,7 @@ export interface Provider {
   metadata: Record<string, unknown>;
   active: boolean;
   createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface ProviderConfig {
@@ -53,6 +55,7 @@ export interface ProviderConfig {
   langfusePromptName: string | null;
   active: boolean;
   createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface Workflow {
@@ -78,6 +81,7 @@ export interface Contract {
   llmConfidence: number;
   finalConfidence: number;
   createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface ReviewTask {
@@ -90,6 +94,7 @@ export interface ReviewTask {
   timeoutAt: Date | null;
   reviewedAt: Date | null;
   createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface WorkflowStateLog {
