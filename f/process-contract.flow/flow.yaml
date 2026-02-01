@@ -59,8 +59,85 @@ value:
         branches:
           - summary: Needs human review
             expr: results.extract.needsReview === true
-            modules: []
-            # Sprint 5: suspend/resume for human review
+            modules:
+              # Step A: Suspend flow and present approval form
+              - id: approval
+                summary: Wait for human review decision
+                value:
+                  type: rawscript
+                  language: bun
+                  content: |
+                    import * as wmill from "windmill-client@1";
+                    export async function main() {
+                      const urls = await wmill.getResumeUrls("reviewer");
+                      return { resume: urls.resume, cancel: urls.cancel };
+                    }
+                suspend:
+                  required_events: 1
+                  timeout: 86400
+                  resume_form:
+                    schema:
+                      type: object
+                      order:
+                        - action
+                        - correctedData
+                        - notes
+                      properties:
+                        action:
+                          type: string
+                          description: Review decision
+                          enum:
+                            - approve
+                            - reject
+                            - correct
+                        correctedData:
+                          type: object
+                          description: Corrected contract data (only for 'correct' action)
+                        notes:
+                          type: string
+                          description: Optional reviewer notes
+                      required:
+                        - action
+
+              # Step B: Send review decision to Express service
+              - id: handle_review
+                summary: Process review decision
+                value:
+                  type: script
+                  path: f/process_contract/handle_review
+                  input_transforms:
+                    workflowId:
+                      type: javascript
+                      expr: results.extract.workflowId
+                    action:
+                      type: javascript
+                      expr: resume.action
+                    correctedData:
+                      type: javascript
+                      expr: resume.correctedData ?? null
+                    notes:
+                      type: javascript
+                      expr: resume.notes ?? null
+
+              # Step C: Branch on review outcome
+              - id: review_result_branch
+                summary: Route based on review outcome
+                value:
+                  type: branchone
+                  default:
+                    - id: compare_after_review
+                      summary: Compare tariffs after approved review
+                      value:
+                        type: script
+                        path: f/process_contract/compare
+                        input_transforms:
+                          workflowId:
+                            type: javascript
+                            expr: results.extract.workflowId
+                  branches:
+                    - summary: Rejected — skip compare
+                      expr: results.handle_review.state === 'rejected'
+                      modules: []
 
 schema:
   $schema: "https://json-schema.org/draft/2020-12/schema"
