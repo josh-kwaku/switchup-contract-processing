@@ -9,7 +9,7 @@
 
 ## Overview
 
-7 sprints, 31 tasks. Each sprint produces demoable software. Every task is atomic and committable.
+5 sprints + 1 final sprint, 28 tasks. Each sprint produces demoable software. Every task is atomic and committable.
 
 **ORM:** Drizzle ORM throughout — TypeScript-first schema definitions, type-safe query builder, NeonDB-native adapter. No raw SQL in application code.
 
@@ -18,8 +18,8 @@
 - Windmill is pure orchestrator — thin HTTP callers only, no business logic in `f/`
 - Flow consolidated from 5 steps to 4: ingest, extract (+ validate), compare, approval
 - Sprint 4 rewritten: HTTP API layer (Task 4.2) + thin Windmill scripts (Task 4.3) + flow (Task 4.4)
-- Sprints 5-6 updated: review and retry logic communicated via HTTP
-- Sprint 7: demo script works both direct-to-service and via Windmill
+- Sprints 5 updated: review logic communicated via HTTP
+- Sprints 6-7 consolidated into Final Sprint: retry endpoint, README, Windmill UX (file upload)
 - See `docs/decisions/ADR-002-windmill-deployment-challenges.md` for full rationale
 
 **Key changes from v1:**
@@ -510,121 +510,66 @@ Handle reviewer corrections to extracted data.
 
 ---
 
-## Sprint 6: Error Handling, Retry Logic, Resilience
+## Final Sprint: Retry Logic, Demo Prep, UX (consolidated from Sprints 6–7)
 
-**Goal:** Graceful failure handling. Windmill retries at failed step via HTTP. Service returns structured errors with `retryable` flag. Langfuse cache fallback verified end-to-end.
+**Goal:** Retry at failed step via HTTP endpoint. README. Windmill flow auto-generated UI with file upload.
 
-**Demo:** LLM failure → Windmill retries extract step → succeeds. Langfuse down → cached prompt. `workflow_state_log` with retry history.
+**Demo:** Failed workflow → retry at failed step. Upload PDF via Windmill UI file picker. README documents full system.
 
-### Task 6.1: Implement Retry Logic
+**Note:** Sprints 6 and 7 were consolidated. Error handling, structured logging, and Langfuse cache fallback were addressed incrementally during Sprints 1–5. Synthetic test PDFs already existed from Sprint 2. GitHub repo was created during Sprint 4.
 
-Error handling via HTTP status codes and Windmill retry configuration.
+### Task F.1: Implement Retry Endpoint ✅
 
 **Deliverables:**
-- Service error responses include `retryable` flag and error code
-- HTTP status mapping: transient errors → 503 (retryable), permanent errors → 400/422 (not retryable)
-- Windmill flow retry configuration per step:
-  - `ingest`: no retry (corrupt PDF is permanent)
-  - `extract`: 3 retries, exponential backoff (LLM failures are transient)
-  - `compare`: 1 retry
-- Service increments `retry_count` on each failed attempt
-- retry_count >= 3 → service transitions to `rejected`
+- `POST /workflows/:id/retry` endpoint — validates workflow is in `failed` state, determines failed step via `getFailedStep()`, transitions back to that step
+- `getFailedStep(workflowId)` service function — queries `workflow_state_log` for the last state before `failed`
+- `findLatestStateLog(workflowId)` repository query
+- `RETRY_STEP_NOT_FOUND` error code
+- `f/process_contract/retry.ts` — thin Windmill script calling the retry endpoint
 
-**Validation:**
-- Simulate LLM failure (503) → Windmill retries → second call succeeds → workflow completes
-- Simulate 3 consecutive failures → workflow `rejected`
-- `workflow_state_log` shows retry transitions
+**Validation:** Fail a workflow → `POST /workflows/:id/retry` → workflow transitions back to the failed step.
 
 ---
 
-### Task 6.2: Verify Langfuse Cache Fallback End-to-End
-
-Ensure cache works within the service (cache built in Task 2.2).
+### Task F.2: Write README ✅
 
 **Deliverables:**
-- Verify Langfuse prompt cache warms on service startup
-- Verify stale cache used when Langfuse unavailable (warning log emitted)
-- Verify no cache + Langfuse down → `LANGFUSE_UNAVAILABLE` → 503 response
-
-**Validation:** Run flows with Langfuse available and unavailable. Check service logs.
-
----
-
-### Task 6.3: Add Comprehensive Structured Logging
-
-Audit all modules for consistent structured logging. Add request-level correlation.
-
-**Deliverables:**
-- Audit all service modules: entry/exit logging, error logging with codes, timing for LLM/DB
-- All logs include `workflowId`, `step`, `requestId` context
-- HTTP request/response logging with duration
-- No sensitive data in logs (no PDF content, no API keys)
-
-**Validation:** Full workflow via Windmill → capture service logs:
-- Every state transition: INFO log
-- Every error: ERROR with errorCode, retryable
-- `workflowId` and `requestId` in every line
-- No secrets or PDF content
-
----
-
-## Sprint 7: Demo Preparation — Test Data, Scripts, README
-
-**Goal:** Synthetic German PDFs. Full demo scenarios. README. GitHub repo.
-
-**Demo:** 3 scenarios (one per vertical): auto-approve, human review, timeout.
-
-### Task 7.1: Create Synthetic German Contract PDFs
-
-**Deliverables:**
-- `test/fixtures/vattenfall-energy.pdf` — German energy contract (Grundpreis, Arbeitspreis, Vertragslaufzeit, Kündigungsfrist)
-- `test/fixtures/telekom-telco.pdf` — German mobile contract
-- `test/fixtures/allianz-insurance.pdf` — German insurance policy
-- `scripts/generate-test-pdfs.ts` — Generates PDFs programmatically
-
-**Validation:** Each PDF opens in viewer. Each extracts correctly through pipeline.
-
----
-
-### Task 7.2: Create End-to-End Demo Script
-
-**Deliverables:**
-- `scripts/demo.ts` — Calls the service API directly (no Windmill dependency for basic demo). 3 scenarios:
-  1. **Auto-approve (Energy):** High-confidence Vattenfall → ingest → extract → compare → completed
-  2. **Human review (Telco):** Low-confidence Telekom → ingest → extract → review_required (pauses)
-  3. **Unknown provider (Insurance):** Routes to review
-- `scripts/demo-windmill.ts` — Triggers via Windmill webhook to show orchestration
-- `package.json` scripts: `demo`, `demo:windmill`
-
-**Validation:** `npm run demo` → scenario 1 completes end-to-end via HTTP. `npm run demo:windmill` → same flow visible in Windmill UI.
-
----
-
-### Task 7.3: Write README
-
-**Deliverables:**
-- `README.md`:
-  - Project overview and motivation
-  - Architecture diagram (service + Windmill orchestrator)
-  - Quick start (prerequisites, setup, run service, run Windmill)
-  - Demo walkthrough (3 scenarios, both direct API and Windmill)
-  - Key design decisions (links to ADRs, especially ADR-002)
-  - Provider abstraction (how to add vertical/provider)
-  - Tech stack with rationale
-  - Project structure
+- `README.md` with: project overview, architecture, setup instructions, API docs, demo walkthrough, state machine diagram, tech stack, project structure, key design decisions
 
 **Validation:** Clone → follow README → run demo successfully.
 
 ---
 
-### Task 7.4: Create GitHub Repository and Push
+### Task F.3: Verify Synthetic Test PDFs ✅
 
 **Deliverables:**
-- Create GitHub repo (public)
-- Push with meaningful commit history (not one giant commit)
-- Verify README renders on GitHub
+- Confirmed 4 existing test fixtures from Sprint 2 are sufficient:
+  - `test/fixtures/vattenfall-energy.pdf`
+  - `test/fixtures/telekom-telco.pdf`
+  - `test/fixtures/allianz-insurance.pdf`
+  - `test/fixtures/unknown-provider.pdf`
 
-**Validation:** Repo visible with clean history and readable README.
+---
+
+### Task F.4: Windmill Flow UX — File Upload via Auto-Generated UI ✅
+
+**Deliverables:**
+- Updated flow schema: `contentEncoding: base64` on `pdfBase64` → Windmill renders file upload widget
+- Updated flow schema: `enum` on `verticalSlug` → Windmill renders dropdown (energy, telco, insurance)
+- No custom app or backend changes required
+
+**Validation:** Open flow in Windmill UI → file picker and dropdown visible → upload PDF → flow triggers.
+
+---
+
+### Dropped/Deferred Tasks
+
+| Original Task | Reason |
+|---------------|--------|
+| Task 6.2: Langfuse cache e2e verification | Cache built and working since Task 2.2; verified incrementally |
+| Task 6.3: Comprehensive structured logging audit | Logging done incrementally across all tasks |
+| Task 7.2: End-to-end demo script | Demo can be run via Windmill UI or curl; script not essential for POC |
+| Task 7.4: GitHub repo + push | Repo created during Sprint 4 |
 
 ---
 
@@ -637,8 +582,7 @@ Audit all modules for consistent structured logging. Add request-level correlati
 | 3 | Core Services | 4 | 17 |
 | 4 | HTTP Service + Windmill Orchestration | 4 | 21 |
 | 5 | Human-in-the-Loop | 3 | 24 |
-| 6 | Error Handling + Resilience | 3 | 27 |
-| 7 | Demo Preparation | 4 | 31 |
+| Final | Retry, Demo Prep, UX | 4 | 28 |
 
 ---
 

@@ -21,7 +21,7 @@ SwitchUp Contract Processing System — portfolio demo for Senior Fullstack Engi
 - [x] Code review subagent
 - [x] Session management workflow (CLAUDE.md, SESSION.md, ISSUES.md, PROGRESS.md)
 - [x] ADR decisions directory
-- [x] Sprint plan (7 sprints, 30 tasks, Drizzle ORM)
+- [x] Sprint plan (5 sprints + final sprint, 28 tasks, Drizzle ORM)
 
 ---
 
@@ -61,10 +61,11 @@ SwitchUp Contract Processing System — portfolio demo for Senior Fullstack Engi
 - [x] Task 5.2: Implement review correction flow
 - [x] Task 5.3: Implement review timeout
 
-### Final Sprint: Retry Logic + Demo Prep (consolidated from Sprints 6–7)
-- [x] Retry endpoint + getFailedStep service
-- [x] README
-- [x] Synthetic PDFs verified (already existed from Sprint 2)
+### Final Sprint: Retry, Demo Prep, UX (consolidated from Sprints 6–7)
+- [x] Task F.1: Retry endpoint + getFailedStep service
+- [x] Task F.2: README
+- [x] Task F.3: Synthetic PDFs verified (already existed from Sprint 2)
+- [x] Task F.4: Windmill flow UX — file upload via auto-generated UI (`contentEncoding: base64`, `enum` dropdown)
 
 ---
 

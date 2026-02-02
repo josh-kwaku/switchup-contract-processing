@@ -101,7 +101,7 @@ Then sync scripts and deploy the flow:
 
 ```bash
 wmill sync push --yes
-wmill flow push f/process-contract.flow
+wmill flow push f/process-contract.flow f/process_contract/flow
 ```
 
 See [Windmill Setup Guide](docs/guides/WINDMILL_SETUP.md) for details.

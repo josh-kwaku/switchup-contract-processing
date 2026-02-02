@@ -1,7 +1,7 @@
 summary: Process Contract
 description: >
   Contract processing pipeline. Windmill orchestrates thin HTTP callers
-  that delegate all business logic to the Express service (ADR-002).
+  that delegate all business logic to the Express service
   Steps: ingest → extract (+ validate) → branch (compare or human review).
 value:
   modules:
@@ -166,10 +166,15 @@ schema:
   properties:
     pdfBase64:
       type: string
+      contentEncoding: base64
       description: Base64-encoded PDF contract
     verticalSlug:
       type: string
-      description: Vertical identifier (energy, telco, insurance)
+      description: Vertical identifier
+      enum:
+        - energy
+        - telco
+        - insurance
     filename:
       type: string
       description: Optional original filename
