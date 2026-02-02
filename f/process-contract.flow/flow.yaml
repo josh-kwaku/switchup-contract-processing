@@ -100,7 +100,29 @@ value:
                       required:
                         - action
 
-              # Step B: Branch — timeout (error) vs reviewer action
+              # Step B: Capture resume data before branching
+              - id: capture_resume
+                summary: Capture reviewer response
+                continue_on_error: true
+                value:
+                  type: rawscript
+                  language: bun
+                  content: |
+                    export async function main(action: string | null, correctedData: any, notes: string | null) {
+                      return { action, correctedData, notes };
+                    }
+                  input_transforms:
+                    action:
+                      type: javascript
+                      expr: resume.action ?? null
+                    correctedData:
+                      type: javascript
+                      expr: resume.correctedData ?? null
+                    notes:
+                      type: javascript
+                      expr: resume.notes ?? null
+
+              # Step C: Branch — timeout (error) vs reviewer action
               - id: timeout_branch
                 summary: Check if approval timed out
                 value:
@@ -118,13 +140,13 @@ value:
                             expr: results.extract.workflowId
                           action:
                             type: javascript
-                            expr: resume.action
+                            expr: results.capture_resume.action
                           correctedData:
                             type: javascript
-                            expr: resume.correctedData ?? null
+                            expr: results.capture_resume.correctedData ?? null
                           notes:
                             type: javascript
-                            expr: resume.notes ?? null
+                            expr: results.capture_resume.notes ?? null
 
                     # Step C: Branch on review outcome
                     - id: review_result_branch
@@ -148,7 +170,7 @@ value:
 
                   branches:
                     - summary: Timed out — no reviewer response
-                      expr: results.approval != null && results.approval.error != null
+                      expr: results.capture_resume != null && results.capture_resume.error != null
                       modules:
                         - id: handle_timeout
                           summary: Process review timeout
