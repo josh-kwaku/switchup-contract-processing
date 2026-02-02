@@ -8,8 +8,7 @@ I built this to get hands-on with SwitchUp's actual stack (TypeScript, Windmill,
 
 ## Demo Video
 
-<!-- TODO: Replace with actual video link after recording -->
-[Coming soon]
+[Watch the full demo on Loom](https://www.loom.com/share/9eb554be3e7548e9884be3adcf71cd93) (~5 min) - Covers happy path, human review flow, and Langfuse prompt management.
 
 ## What It Does
 
