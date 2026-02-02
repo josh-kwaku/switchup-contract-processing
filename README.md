@@ -1,18 +1,27 @@
 # SwitchUp Contract Processing System
 
-AI-powered contract processing pipeline with multi-vertical support, human-in-the-loop review, and workflow orchestration. Built as a portfolio demo for SwitchUp (Berlin) — Senior Fullstack Engineer, Internal AI-Native Platform.
+AI-powered contract processing pipeline with multi-vertical support, human-in-the-loop review, and workflow orchestration.
+
+## Why I Built This
+
+I built this to get hands-on with SwitchUp's actual stack (TypeScript, Windmill, NeonDB, Langfuse) and the engineering challenges described in the job description: provider-agnostic abstraction, configurable-but-robust workflows, and human-in-the-loop AI. The result is a working system that processes German contracts across three verticals (Energy, Telco, Insurance) through a single pipeline, with confidence-based routing to human review.
+
+## Demo Video
+
+<!-- TODO: Replace with actual video link after recording -->
+[Coming soon]
 
 ## What It Does
 
-Processes German utility contracts (Energy, Telco, Insurance) through a unified pipeline:
+Processes German utility contracts through a unified pipeline:
 
-1. **Ingest** — Upload PDF, parse text, store document
-2. **Extract** — LLM extracts structured data (provider, rates, contract terms)
-3. **Validate** — Schema validation + confidence scoring against provider-specific rules
-4. **Review** — Low confidence (<80%) or unknown providers route to human review
-5. **Compare** — Mock tariff comparison (extensibility demo)
+1. **Ingest** - Upload PDF, parse text, store document
+2. **Extract** - LLM extracts structured data (provider, rates, contract terms)
+3. **Validate** - Schema validation + confidence scoring against provider-specific rules
+4. **Review** - Low confidence (<80%) or unknown providers route to human review
+5. **Compare** - Mock tariff comparison (extensibility demo)
 
-Each vertical uses the same pipeline with different prompts and validation rules — no code changes needed to add a new vertical.
+Each vertical uses the same pipeline with different prompts and validation rules. No code changes needed to add a new vertical.
 
 ## Architecture
 
@@ -20,7 +29,7 @@ Each vertical uses the same pipeline with different prompts and validation rules
 PDF Upload
     |
     v
-[Windmill Flow]  ─── orchestrates ───>  [Express Service]  ─── delegates ───>  [Domain Services]
+[Windmill Flow]  --- orchestrates --->  [Express Service]  --- delegates --->  [Domain Services]
   (thin HTTP          step sequencing       API layer            business logic
    callers)           suspend/resume        validation           state machine
                       error handling        routing              DB operations
@@ -35,7 +44,21 @@ PDF Upload
   Llama 3.3 70B
 ```
 
-**Key pattern:** Windmill is a pure orchestrator — all business logic lives in `src/`. Windmill scripts are thin HTTP callers (~15 lines each) that delegate to the Express service. See [ADR-002](docs/decisions/ADR-002-architecture-service-plus-orchestrator.md).
+**Key pattern:** Windmill is a pure orchestrator. All business logic lives in `src/`. Windmill scripts are thin HTTP callers (~15 lines each) that delegate to the Express service. See [ADR-002](docs/decisions/ADR-002-architecture-service-plus-orchestrator.md).
+
+## State Machine
+
+```
+pending -> parsing_pdf -> extracting -> validating -> validated -> comparing -> completed
+                                           |
+                                           v
+                                     review_required -> validated (approve/correct)
+                                           |              |
+                                           v              v
+                                       rejected       timed_out
+
+Any processing state -> failed -> (retry back to failed step, or rejected after 3 retries)
+```
 
 ## Tech Stack
 
@@ -51,6 +74,39 @@ PDF Upload
 | Validation | Zod |
 | Logging | Pino (structured JSON) |
 | HTTP | Express |
+
+## Design Decisions
+
+| Decision | Summary |
+|----------|---------|
+| [ADR-001](docs/decisions/ADR-001-technical-stack.md) | Groq + Langfuse + per-vertical prompts |
+| [ADR-002](docs/decisions/ADR-002-architecture-service-plus-orchestrator.md) | Service + orchestrator split (Express owns logic, Windmill orchestrates) |
+| [ADR-003](docs/decisions/ADR-003-workflow-state-machine.md) | 10-state workflow machine with retry from failed step |
+
+## How I Work
+
+This project was built using Claude Code with a structured methodology:
+
+- **[CLAUDE.md](CLAUDE.md)** - Project memory and session protocol. Encodes coding standards, review gates, and sprint workflow so the AI operates within defined constraints.
+- **Guidelines** - Explicit documents the AI must follow: [CODE_GUIDELINES](docs/guidelines/CODE_GUIDELINES.md), [API_GUIDELINES](docs/guidelines/API_GUIDELINES.md), [ERROR_HANDLING](docs/guidelines/ERROR_HANDLING.md)
+- **[Code review subagent](.claude/agents/code-reviewer.md)** - Custom agent that reviews every task against the guidelines before human review
+- **[Sprint plan](docs/SPRINT_PLAN.md)** - 28 tasks across 6 sprints, each producing demoable software. Every task is atomic and committable with explicit validation criteria.
+- **[Application responses](docs/application-responses.md)** - My answers to the application questions
+
+## Project Structure
+
+```
+src/
+  domain/       Pure types, Result type, Zod schemas (zero dependencies)
+  services/     Business logic: workflow, extraction, validation, review, contract
+  infrastructure/  External integrations: DB, PDF parser, Langfuse, LLM
+  api/          Express routes + middleware
+
+f/              Windmill scripts (thin HTTP callers) + flow YAML
+db/             Migrations
+test/           Fixtures + tests
+docs/           PRD, technical design, guidelines, ADRs
+```
 
 ## Setup
 
@@ -91,7 +147,7 @@ npm run dev          # Development (tsx --watch)
 npm run build && npm start  # Production
 ```
 
-### 5. Start Windmill (optional — for flow orchestration)
+### 5. Start Windmill (optional, for flow orchestration)
 
 ```bash
 docker compose up -d
@@ -139,49 +195,12 @@ curl -X POST http://localhost:3000/workflows/<workflowId>/compare
 
 ### Review path (low confidence)
 
-Use `test/fixtures/low-confidence-energy.pdf` — unknown provider with missing fields triggers human review at the extract step. Approve, reject, or correct via the review endpoint.
+Use `test/fixtures/low-confidence-energy.pdf`. Unknown provider with missing fields triggers human review at the extract step. Approve, reject, or correct via the review endpoint.
 
 ### Via Windmill
 
 Trigger the `process-contract` flow in the Windmill UI with `pdfBase64` and `verticalSlug`. The flow runs all steps automatically, suspending for human review when needed.
 
-## Project Structure
-
-```
-src/
-  domain/       Pure types, Result type, Zod schemas (zero dependencies)
-  services/     Business logic: workflow, extraction, validation, review, contract
-  infrastructure/  External integrations: DB, PDF parser, Langfuse, LLM
-  api/          Express routes + middleware
-
-f/              Windmill scripts (thin HTTP callers) + flow YAML
-db/             Migrations
-test/           Fixtures + tests
-docs/           PRD, technical design, guidelines, ADRs
-```
-
-## Design Decisions
-
-| Decision | Summary |
-|----------|---------|
-| [ADR-001](docs/decisions/ADR-001-technical-stack.md) | Groq + Langfuse + per-vertical prompts |
-| [ADR-002](docs/decisions/ADR-002-architecture-service-plus-orchestrator.md) | Service + orchestrator split (Express owns logic, Windmill orchestrates) |
-| [ADR-003](docs/decisions/ADR-003-workflow-state-machine.md) | 10-state workflow machine with retry from failed step |
-
-## State Machine
-
-```
-pending → parsing_pdf → extracting → validating → validated → comparing → completed
-                                        |
-                                        v
-                                  review_required → validated (approve/correct)
-                                        |              |
-                                        v              v
-                                    rejected       timed_out
-
-Any processing state → failed → (retry back to failed step, or rejected after 3 retries)
-```
-
 ## Author
 
-Joshua Boateng — [GitHub](https://github.com/josh-kwaku)
+Joshua Boateng - [GitHub](https://github.com/josh-kwaku)
