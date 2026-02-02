@@ -290,6 +290,40 @@ router.post('/workflows/:id/review', async (req: Request, res: Response) => {
   }));
 });
 
+router.post('/workflows/:id/retry', async (req: Request, res: Response) => {
+  const workflowId = paramString(req.params.id);
+
+  const wfResult = await workflowService.getWorkflow(workflowId);
+  if (!wfResult.ok) return sendAppError(res, wfResult.error);
+
+  if (wfResult.value.state !== 'failed') {
+    res.status(409).json(errorResponse(
+      'INVALID_STATE_TRANSITION',
+      `Workflow is in state '${wfResult.value.state}', not 'failed'`,
+    ));
+    return;
+  }
+
+  const stepResult = await workflowService.getFailedStep(workflowId);
+  if (!stepResult.ok) return sendAppError(res, stepResult.error);
+
+  const failedAtStep = stepResult.value;
+
+  const t = await workflowService.transitionState(workflowId, failedAtStep, {
+    triggeredBy: 'retry',
+    retryAttempt: wfResult.value.retryCount + 1,
+  });
+  if (!t.ok) return sendAppError(res, t.error);
+
+  logger.info({ workflowId, failedAtStep, retryAttempt: wfResult.value.retryCount + 1 }, 'Workflow retry initiated');
+
+  res.json(successResponse({
+    workflowId,
+    state: failedAtStep,
+    retryAttempt: wfResult.value.retryCount + 1,
+  }));
+});
+
 router.get('/workflows/:id', async (req: Request, res: Response) => {
   const wfResult = await workflowService.getWorkflow(paramString(req.params.id));
   if (!wfResult.ok) return sendAppError(res, wfResult.error);

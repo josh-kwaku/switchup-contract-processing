@@ -1,7 +1,7 @@
 import { ok, err, type Result } from '../../domain/result.js';
 import { createAppError, type AppError } from '../../domain/errors.js';
 import { logger } from '../../infrastructure/logger.js';
-import type { Workflow, WorkflowState } from '../../domain/types.js';
+import { type Workflow, type WorkflowState, WORKFLOW_STATES } from '../../domain/types.js';
 import type { CreateWorkflowInput, TransitionMetadata } from './types.js';
 import { VALID_TRANSITIONS } from './types.js';
 import {
@@ -11,6 +11,7 @@ import {
   updatePdfStoragePath as updatePdfStoragePathRepo,
   incrementRetryCount,
   insertStateLog,
+  findLatestStateLog,
 } from './repository.js';
 
 export type { CreateWorkflowInput, TransitionMetadata } from './types.js';
@@ -180,6 +181,38 @@ export async function failWorkflow(
     logger.error({ workflowId, error: message }, 'Failed to increment retry count');
     return err(
       createAppError('DB_CONNECTION_ERROR', 'Failed to update retry count', true, message),
+    );
+  }
+}
+
+export async function getFailedStep(
+  workflowId: string,
+): Promise<Result<WorkflowState, AppError>> {
+  try {
+    const log = await findLatestStateLog(workflowId, 'failed');
+
+    if (!log?.metadata) {
+      return err(
+        createAppError('RETRY_STEP_NOT_FOUND', `No failure record found for workflow '${workflowId}'`, false),
+      );
+    }
+
+    const failedAtStep = log.metadata.failedAtStep;
+    if (
+      typeof failedAtStep !== 'string'
+      || !(WORKFLOW_STATES as readonly string[]).includes(failedAtStep)
+    ) {
+      return err(
+        createAppError('RETRY_STEP_NOT_FOUND', `Invalid or missing failedAtStep in failure metadata for workflow '${workflowId}'`, false),
+      );
+    }
+
+    return ok(failedAtStep as WorkflowState);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error({ workflowId, error: message }, 'Failed to get failed step');
+    return err(
+      createAppError('DB_CONNECTION_ERROR', 'Failed to get failed step', true, message),
     );
   }
 }

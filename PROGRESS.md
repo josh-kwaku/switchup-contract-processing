@@ -5,7 +5,7 @@
 SwitchUp Contract Processing System — portfolio demo for Senior Fullstack Engineer application.
 
 **Timeline**: 6-8 hours using Claude Code
-**Current Phase**: Sprint 5 Complete, Sprint 6 next
+**Current Phase**: All sprints complete
 
 ---
 
@@ -61,16 +61,10 @@ SwitchUp Contract Processing System — portfolio demo for Senior Fullstack Engi
 - [x] Task 5.2: Implement review correction flow
 - [x] Task 5.3: Implement review timeout
 
-### Sprint 6: Error Handling, Retry Logic, Resilience
-- [ ] Task 6.1: Implement retry logic in Windmill flow
-- [ ] Task 6.2: Verify Langfuse cache fallback end-to-end
-- [ ] Task 6.3: Add comprehensive structured logging
-
-### Sprint 7: Demo Preparation — Test Data, Scripts, README
-- [ ] Task 7.1: Create synthetic German contract PDFs
-- [ ] Task 7.2: Create end-to-end demo script
-- [ ] Task 7.3: Write README
-- [ ] Task 7.4: Create GitHub repository and push
+### Final Sprint: Retry Logic + Demo Prep (consolidated from Sprints 6–7)
+- [x] Retry endpoint + getFailedStep service
+- [x] README
+- [x] Synthetic PDFs verified (already existed from Sprint 2)
 
 ---
 

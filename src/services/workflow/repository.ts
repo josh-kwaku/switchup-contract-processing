@@ -1,7 +1,7 @@
-import { eq } from 'drizzle-orm';
+import { eq, desc, and } from 'drizzle-orm';
 import { getDb } from '../../infrastructure/db/client.js';
 import { workflows, workflowStateLog } from '../../infrastructure/db/schema.js';
-import type { Workflow, WorkflowState } from '../../domain/types.js';
+import type { Workflow, WorkflowState, WorkflowStateLog } from '../../domain/types.js';
 
 function toWorkflow(row: typeof workflows.$inferSelect): Workflow {
   return {
@@ -119,4 +119,33 @@ export async function insertStateLog(
     toState: entry.toState,
     metadata: entry.metadata ?? {},
   });
+}
+
+export async function findLatestStateLog(
+  workflowId: string,
+  toState: WorkflowState,
+): Promise<WorkflowStateLog | null> {
+  const rows = await getDb()
+    .select()
+    .from(workflowStateLog)
+    .where(
+      and(
+        eq(workflowStateLog.workflowId, workflowId),
+        eq(workflowStateLog.toState, toState),
+      ),
+    )
+    .orderBy(desc(workflowStateLog.createdAt))
+    .limit(1);
+
+  if (rows.length === 0) return null;
+
+  const row = rows[0];
+  return {
+    id: row.id,
+    workflowId: row.workflowId,
+    fromState: row.fromState as WorkflowState | null,
+    toState: row.toState as WorkflowState,
+    metadata: row.metadata as Record<string, unknown> | null,
+    createdAt: row.createdAt,
+  };
 }
