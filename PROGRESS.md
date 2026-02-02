@@ -5,7 +5,7 @@
 SwitchUp Contract Processing System — portfolio demo for Senior Fullstack Engineer application.
 
 **Timeline**: 6-8 hours using Claude Code
-**Current Phase**: Sprint 4 Complete, Sprint 5 next
+**Current Phase**: Sprint 5 Complete, Sprint 6 next
 
 ---
 
@@ -57,9 +57,9 @@ SwitchUp Contract Processing System — portfolio demo for Senior Fullstack Engi
 - [x] Task 4.4: Create Windmill flow definition + deploy
 
 ### Sprint 5: Human-in-the-Loop Review
-- [ ] Task 5.1: Implement Windmill suspend/resume for review
-- [ ] Task 5.2: Implement review correction flow
-- [ ] Task 5.3: Implement review timeout
+- [x] Task 5.1: Implement Windmill suspend/resume for review
+- [x] Task 5.2: Implement review correction flow
+- [x] Task 5.3: Implement review timeout
 
 ### Sprint 6: Error Handling, Retry Logic, Resilience
 - [ ] Task 6.1: Implement retry logic in Windmill flow
